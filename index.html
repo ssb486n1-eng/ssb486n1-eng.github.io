@@ -1,0 +1,1374 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- 보안: 외부 연결은 모델 파일(Hugging Face)과 런타임(jsDelivr, 버전 고정)만 허용. 통역 내용은 어디로도 전송하지 않는다 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net; connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co; worker-src 'self' blob:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>로컬 동시통역</title>
+<meta name="theme-color" content="#0b0f14">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233fb97a'/%3E%3Cpath d='M20 18h24v6H35v22h-6V24h-9z' fill='white'/%3E%3C/svg%3E">
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  :root{
+    --bg:#0b0f14; --panel:#141a22; --panel2:#1b2330; --line:#2a3442;
+    --txt:#e8eef5; --sub:#8fa0b3; --me:#3fb97a; --you:#4c9bff; --warn:#e3a33a; --err:#f06464;
+    --fs:20px;
+  }
+  html,body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;-webkit-text-size-adjust:100%}
+  body{display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden;
+    padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+  button{font:inherit;color:inherit;cursor:pointer;touch-action:manipulation}
+
+  header{flex:none;display:flex;align-items:center;gap:8px;padding:8px 12px;
+    padding-top:calc(8px + env(safe-area-inset-top));background:var(--panel);border-bottom:1px solid var(--line)}
+  header h1{flex:1;margin:0;font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dot{width:10px;height:10px;border-radius:50%;background:#556;flex:none}
+  .dot.live{background:var(--me);box-shadow:0 0 8px var(--me)}
+  .dot.busy{background:var(--warn)}
+  .dot.err{background:var(--err)}
+  @media (max-width:440px){ header h1{display:none} .meter{flex:1} }
+  .meter{font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .iconbtn{background:var(--panel2);border:1px solid var(--line);border-radius:10px;width:44px;height:40px;font-size:17px;flex:none}
+  .priv{font-size:11px;border:1px solid var(--line);border-radius:10px;padding:2px 7px;white-space:nowrap;color:var(--sub)}
+  .priv.local{border-color:#2f7d55;color:#9fe3bd}
+  .priv.cloud{border-color:#7a5a1d;color:#f2cf8a}
+
+  .dirbar{flex:none;display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px 12px;background:var(--panel)}
+  .dir{border:2px solid var(--line);background:var(--panel2);border-radius:14px;padding:10px 8px;text-align:center;line-height:1.3;min-height:56px}
+  .dir .t1{font-size:15px;font-weight:700}
+  .dir .t2{font-size:12px;color:var(--sub);margin-top:2px}
+  .dir.on.A{border-color:var(--me);background:#123123}
+  .dir.on.B{border-color:var(--you);background:#122136}
+  .dir.auto{opacity:.85}
+
+  #status{flex:none;font-size:12px;color:var(--sub);padding:4px 12px 6px;min-height:20px;background:var(--panel)}
+  #prog{flex:none;display:none;padding:0 12px 6px;background:var(--panel)}
+  #prog .bar{height:6px;background:var(--panel2);border-radius:4px;overflow:hidden}
+  #prog .fill{height:100%;width:0;background:var(--you);transition:width .2s}
+  #prog .lbl{font-size:11px;color:var(--sub);margin-top:3px;font-variant-numeric:tabular-nums}
+  #lvl{flex:none;height:3px;background:var(--panel);border-bottom:1px solid var(--line)}
+  #lvl i{display:block;height:100%;width:0;background:var(--me);transition:width .08s}
+
+  main{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+  .pane{display:flex;flex-direction:column;min-height:0;min-width:0;padding:8px 14px}
+  #pTrans{flex:1.35 1 0;border-bottom:1px solid var(--line)}
+  #pSrc{flex:1 1 0}
+  #pTrans.flip{transform:rotate(180deg)}
+  .plbl{flex:none;font-size:11px;letter-spacing:.06em;color:var(--sub);display:flex;justify-content:space-between;margin-bottom:4px}
+  .scroll{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;gap:6px;overscroll-behavior:contain}
+  .ln{white-space:pre-wrap;word-break:break-word;line-height:1.38}
+  #pTrans .ln{font-size:calc(var(--fs) * 1.15);font-weight:600}
+  #pSrc .ln{font-size:calc(var(--fs) * .85)}
+  .ln.A{color:#bff0d4} .ln.B{color:#c8defc}
+  .ln .tag{font-size:10px;font-weight:600;color:var(--sub);border:1px solid var(--line);border-radius:8px;padding:0 5px;margin-right:6px;vertical-align:2px}
+  .ln .t,.ln .p{opacity:.5;font-weight:500}
+  .ln .p{font-style:italic}
+  .empty{color:var(--sub);font-size:14px;line-height:1.7;margin:auto 0;text-align:center}
+
+  /* 태블릿 가로: 통역/원문 나란히 */
+  @media (min-width:900px) and (orientation:landscape){
+    body:not(.face) main{flex-direction:row}
+    body:not(.face) #pTrans{border-bottom:none;border-right:1px solid var(--line)}
+  }
+  /* 대면 모드: 기기를 테이블에 눕혀 두고 마주 앉아 사용. 위쪽 절반은 상대가 읽도록 180° 회전 */
+  body.face #pTrans{flex:1 1 0;transform:rotate(180deg);border-bottom:2px dashed var(--line)}
+  body.face #pSrc{flex:1 1 0}
+  body.face #pSrc .ln,body.face #pTrans .ln{font-size:calc(var(--fs) * 1.05);font-weight:600}
+  body.face #dirB{transform:rotate(180deg)}
+
+  #chips{flex:none;display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .chip{font-size:11.5px;background:#2a2412;border:1px solid #6b5520;color:#f2d59a;border-radius:12px;padding:3px 8px}
+
+  footer{flex:none;padding:8px 12px;padding-bottom:calc(8px + env(safe-area-inset-bottom));background:var(--panel);border-top:1px solid var(--line)}
+  .row{display:flex;gap:8px;align-items:center}
+  #mainBtn{flex:1;height:54px;border:none;border-radius:14px;font-size:17px;font-weight:800;color:#fff;background:var(--me)}
+  #mainBtn.stop{background:var(--err)}
+  #mainBtn:disabled{opacity:.6}
+  .tools{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:7px}
+  .tool{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 2px;font-size:11.5px;min-height:40px}
+  .tool.on{border-color:var(--you);color:#9cc5ff}
+  #typeRow{display:none;margin-top:7px}
+  #typeRow.show{display:flex}
+  #typeIn{flex:1;min-width:0;background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:16px}
+  #typeGo{background:var(--you);border:none;border-radius:10px;color:#fff;padding:0 16px;height:44px;font-weight:700}
+
+  #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(150px + env(safe-area-inset-bottom));
+    background:#000d;border:1px solid var(--line);color:#fff;padding:10px 16px;border-radius:18px;font-size:13px;
+    opacity:0;transition:.25s;pointer-events:none;z-index:90;max-width:92%;text-align:center}
+  #toast.show{opacity:1}
+
+  .modal{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;z-index:60;padding:14px}
+  .modal.show{display:flex}
+  .sheet{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;width:100%;max-width:600px;max-height:90dvh;overflow:auto;overscroll-behavior:contain}
+  .sheet h2{margin:0 0 8px;font-size:17px}
+  .sheet h3{margin:18px 0 6px;font-size:13px;border-top:1px solid var(--line);padding-top:12px}
+  .sheet p{font-size:12.5px;color:var(--sub);line-height:1.65;margin:4px 0}
+  .fld{display:flex;flex-direction:column;gap:4px;margin:8px 0;min-width:0}
+  .fld label{font-size:12.5px;color:var(--txt)}
+  .fld small{font-size:11.5px;color:var(--sub);line-height:1.5}
+  .fld input,.fld select,.fld textarea{background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:9px;padding:10px;font-size:16px;font-family:inherit;width:100%;min-width:0}
+  .fld textarea{min-height:90px;font-size:13px;font-family:ui-monospace,monospace}
+  .chk{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+  .chk span{font-size:13.5px}
+  .chk small{display:block;font-size:11.5px;color:var(--sub);margin-top:2px;line-height:1.45}
+  .chk input{width:22px;height:22px;flex:none;accent-color:var(--me)}
+  .grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px}
+  .btn{width:100%;margin-top:8px;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);font-size:14px;font-weight:600}
+  .btn.sm{padding:10px;font-size:12.5px;margin-top:0}
+  .btn.pri{background:var(--you);border-color:var(--you);color:#fff}
+  .btn.danger{border-color:#7a2b2b;color:#ffb3b3}
+  .diag{background:#070a0e;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:12px;font-family:ui-monospace,monospace;color:#a9e6c0;white-space:pre-wrap;line-height:1.55;margin-top:8px;overflow-x:auto}
+  .note{background:#2a2412;border:1px solid #6b5520;color:#f2d59a;border-radius:9px;padding:9px 11px;font-size:12px;line-height:1.6;margin-top:8px}
+  .note.ok{background:#10261b;border-color:#2f7d55;color:#bdeccf}
+</style>
+</head>
+<body>
+
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>로컬 동시통역 · No API</h1>
+  <span class="priv" id="priv" title="데이터 처리 위치">🔒 대기</span>
+  <span class="meter" id="meter">00:00</span>
+  <button class="iconbtn" id="setBtn" title="설정" aria-label="설정">⚙️</button>
+</header>
+
+<div class="dirbar">
+  <button class="dir A on" id="dirA"><div class="t1">🎤 내가 말함</div><div class="t2" id="dirAsub">한국어 → 영어</div></button>
+  <button class="dir B" id="dirB"><div class="t1">👂 상대가 말함</div><div class="t2" id="dirBsub">영어 → 한국어</div></button>
+</div>
+<div id="status">▶ 시작을 누르면 이 기기의 엔진을 점검하고 바로 통역합니다. API 키가 필요 없습니다.</div>
+<div id="prog"><div class="bar"><div class="fill" id="progFill"></div></div><div class="lbl" id="progLbl"></div></div>
+<div id="lvl"><i id="lvlBar"></i></div>
+
+<main>
+  <section class="pane" id="pTrans">
+    <div class="plbl"><span id="lblTrans">통역</span><span id="lblTransR"></span></div>
+    <div class="scroll" id="sTrans"><div class="empty" id="emptyMsg">말하는 동안 <b>절(clause) 단위</b>로 바로 번역·낭독합니다.<br>문장이 끝날 때까지 기다리지 않습니다.<br><small>음성·텍스트는 이 기기 안에서 처리됩니다.</small></div></div>
+  </section>
+  <section class="pane" id="pSrc">
+    <div class="plbl"><span id="lblSrc">원문</span><span id="lblSrcR"></span></div>
+    <div class="scroll" id="sSrc"></div>
+    <div id="chips"></div>
+  </section>
+</main>
+
+<footer>
+  <div class="row"><button id="mainBtn">▶ 통역 시작</button></div>
+  <div class="row" id="typeRow"><input id="typeIn" placeholder="직접 입력해서 통역 (Enter)" autocomplete="off" enterkeyhint="send"><button id="typeGo">↵</button></div>
+  <div class="tools">
+    <button class="tool on" id="tAudio">🔊 낭독</button>
+    <button class="tool" id="tPause">⏸ 정지</button>
+    <button class="tool" id="tFace">👥 대면</button>
+    <button class="tool" id="tType">⌨️ 입력</button>
+    <button class="tool" id="tExport">📋 기록</button>
+  </div>
+</footer>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<!-- 설정 -->
+<div class="modal" id="mSet"><div class="sheet">
+  <h2>⚙️ 설정</h2>
+
+  <div class="note ok"><b>API 없이 동작하는 원리</b><br>
+    음성 인식·번역·음성 합성을 <b>브라우저 내장 엔진</b> 또는 <b>기기에서 직접 실행하는 오픈 모델</b>로 처리합니다.
+    서버·API 키·사용료가 없고, 모델을 한 번 받아 두면 오프라인에서도 동작합니다.
+    <b>자동</b> 설정은 PC·태블릿·폰의 성능을 측정해 모델 크기를 고릅니다.</div>
+
+  <h3>언어</h3>
+  <div class="grid2">
+    <div class="fld"><label>내 언어</label><select id="fMine"></select></div>
+    <div class="fld"><label>상대 언어</label><select id="fPartner"></select></div>
+  </div>
+  <div class="fld"><label>방향 전환</label>
+    <select id="fDir">
+      <option value="manual">수동 — 화자 버튼을 눌러 전환 (모든 엔진)</option>
+      <option value="auto">자동 — 발화마다 언어를 판별해 전환 (Whisper)</option>
+    </select>
+    <small>자동 모드는 Whisper 언어 토큰 확률을 <b>두 후보 언어로만</b> 비교하고, 차이가 작으면 직전 화자를 유지해 방향이 잘못 뒤집히는 것을 막습니다.</small></div>
+  <div class="fld"><label>화면 배치</label>
+    <select id="fLayout">
+      <option value="stack">기본 — 통역(위) / 원문(아래), 태블릿 가로에서는 좌우</option>
+      <option value="face">대면 — 태블릿을 눕혀 마주 보기 (위쪽은 상대용으로 회전)</option>
+    </select></div>
+
+  <h3>음성 인식</h3>
+  <div class="fld"><label>엔진</label>
+    <select id="fAsr">
+      <option value="auto">자동 (권장) — 기기 내 엔진 우선</option>
+      <option value="ws-local">Web Speech · 기기 내 (Chrome 139+, 언어팩 설치)</option>
+      <option value="ws-cloud">Web Speech · 브라우저 기본 (Chrome: Google 서버로 음성 전송)</option>
+      <option value="whisper">Whisper · 기기 내 실행 (WebGPU/WASM, 완전 오프라인)</option>
+    </select>
+    <small>자동: 기기 내 Web Speech → (완전 로컬 모드가 아니면) 브라우저 기본 Web Speech → Whisper</small></div>
+  <div class="grid2">
+    <div class="fld"><label>Whisper 모델</label>
+      <select id="fWModel">
+        <option value="auto">자동 (기기 성능 기준)</option>
+        <option value="onnx-community/whisper-tiny">tiny (가장 빠름)</option>
+        <option value="onnx-community/whisper-base">base</option>
+        <option value="onnx-community/whisper-small">small (정확)</option>
+        <option value="onnx-community/whisper-large-v3-turbo">large-v3-turbo (고성능 GPU)</option>
+        <option value="custom">직접 입력…</option>
+      </select></div>
+    <div class="fld"><label>연산 장치</label>
+      <select id="fDevice">
+        <option value="auto">자동 (WebGPU → WASM)</option>
+        <option value="webgpu">WebGPU (GPU)</option>
+        <option value="wasm">WASM (CPU)</option>
+      </select></div>
+  </div>
+  <div class="fld" id="wCustomRow" style="display:none"><label>Whisper 모델 ID (transformers.js ONNX 형식)</label>
+    <input id="fWCustom" placeholder="예) onnx-community/whisper-small" autocomplete="off" spellcheck="false"></div>
+  <div class="fld"><label>2단계 인식 (초안 → 확정)</label>
+    <select id="fTwo">
+      <option value="auto">자동 — GPU 가 있으면 사용</option>
+      <option value="on">항상 사용</option>
+      <option value="off">사용 안 함 (모델 1개)</option>
+    </select>
+    <small>말하는 동안은 작은 모델로 빠르게 초안을 내고, 발화가 끝나면 큰 모델로 한 번 더 인식해 확정합니다. 확정문이 초안과 크게 다르면 번역을 다시 해서 화면을 ✎ 정정합니다.</small></div>
+  <div class="chk"><span>용어 프롬프트 (인식 정확도)<small>용어집과 직전 발화를 Whisper 에 문맥으로 주고, Web Speech 에는 문구 가중치(contextual biasing)로 전달합니다. 프롬프트를 그대로 베낀 결과는 자동으로 버리고 다시 인식합니다.</small></span><input type="checkbox" id="fPrompt"></div>
+
+  <h3>번역</h3>
+  <div class="fld"><label>엔진</label>
+    <select id="fMt">
+      <option value="auto">자동 (권장) — Chrome 내장 → 오픈 모델</option>
+      <option value="chrome">Chrome 내장 Translator (데스크톱 Chrome 138+)</option>
+      <option value="local">오픈 모델 (기기 내 실행, 폰·태블릿 포함 모든 브라우저)</option>
+    </select></div>
+  <div class="grid2">
+    <div class="fld"><label>다국어 모델</label>
+      <select id="fMulti">
+        <option value="auto">자동 (기기 기준)</option>
+        <option value="Xenova/m2m100_418M">M2M100 418M (MIT, 가벼움)</option>
+        <option value="Xenova/nllb-200-distilled-600M">NLLB-200 600M (비상업)</option>
+      </select></div>
+    <div class="fld"><label>방향 전용 경량 모델</label>
+      <select id="fOpus">
+        <option value="auto">자동 (폰·저사양에서 사용)</option>
+        <option value="on">항상 우선</option>
+        <option value="off">사용 안 함</option>
+      </select></div>
+  </div>
+  <small style="font-size:11.5px;color:var(--sub)">방향 전용 모델(Opus-MT)은 해당 언어쌍이 있을 때만 쓰고, 없으면 다국어 모델로 자동 전환합니다. Chrome 내장 번역이 직접 지원하지 않는 쌍은 영어를 거쳐 번역합니다.</small>
+  <button class="btn" id="bDiag">🔍 이 기기 엔진 점검</button>
+  <div class="diag" id="diagOut" style="display:none"></div>
+  <div class="grid2" style="margin-top:6px">
+    <button class="btn sm" id="bPreW">⬇️ 인식 모델 미리 받기</button>
+    <button class="btn sm" id="bPreN">⬇️ 번역 모델 미리 받기</button>
+  </div>
+
+  <h3>동시통역 전략</h3>
+  <div class="fld"><label>분할 방식</label>
+    <select id="fAggr">
+      <option value="fast">빠름 — 짧은 절 단위 (지연 최소)</option>
+      <option value="normal">균형 — 연결어미·접속사 단위 (권장)</option>
+      <option value="quality">정확 — 문장 단위</option>
+    </select></div>
+  <div class="fld"><label>확정 기준 (LocalAgreement) <b id="agLbl"></b></label>
+    <input id="fAgree" type="range" min="2" max="3" step="1">
+    <small>2 = 연속 2개 인식 결과가 일치하면 확정 (빠름) · 3 = 3개 일치 (안정)</small></div>
+  <div class="chk"><span>미완성 구간 미리보기<small>확정 전 구간을 반복 재번역해 흐리게 표시 (번역이 빠를 때만 자동 동작)</small></span><input type="checkbox" id="fPreview"></div>
+  <div class="fld"><label>발화 끝 판정 (Whisper) <b id="endLbl"></b></label><input id="fEnd" type="range" min="350" max="1500" step="50">
+    <small>5초 넘게 이어지는 발화는 짧은 쉼(0.28초)에서도 끊어 지연을 줄입니다.</small></div>
+
+  <h3>음성 출력</h3>
+  <div class="chk"><span>내 말 통역 낭독<small>상대에게 들려줄 음성</small></span><input type="checkbox" id="fTtsA"></div>
+  <div class="chk"><span>상대 말 통역 낭독<small>이어폰으로 들으면 편합니다</small></span><input type="checkbox" id="fTtsB"></div>
+  <div class="fld"><label>기본 낭독 속도 <b id="rateLbl"></b></label><input id="fRate" type="range" min="0.8" max="1.5" step="0.05"></div>
+  <div class="chk"><span>밀리면 자동 가속<small>낭독 대기열이 쌓이면 최대 1.7배까지 빨라집니다</small></span><input type="checkbox" id="fAdapt"></div>
+  <div class="fld"><label>마이크·스피커 환경</label>
+    <select id="fEcho">
+      <option value="speaker">스피커 — 낭독 중 마이크 차단 + 에코 문장 제거</option>
+      <option value="earphone">이어폰/헤드셋 — 차단 없음 (가장 빠름)</option>
+    </select></div>
+
+  <h3>용어집</h3>
+  <div class="chk"><span>전문용어 강제 적용<small>번역 전에 원문 용어를 표준 대역으로 치환 → 번역 결과 용어 일관성 확보 (기본 용어 <span id="glCnt"></span>개). 인식 결과의 약어(알씨에스→RCS)·띄어쓰기(냉각 탑→냉각탑)도 교정합니다.</small></span><input type="checkbox" id="fGloss"></div>
+  <div class="fld"><label>사용자 용어 (한 줄에 하나)</label>
+    <textarea id="fUserGl" placeholder="코드|한국어|영어|체코어&#10;또는  한국어=영어=체코어&#10;예) 집수정=sump pit=jímka"></textarea></div>
+
+  <h3>보안·기록</h3>
+  <div class="chk"><span>완전 로컬 모드<small>음성·텍스트가 기기 밖으로 나가는 엔진(클라우드 Web Speech, 네트워크 음성)을 사용하지 않습니다</small></span><input type="checkbox" id="fStrict"></div>
+  <div class="chk"><span>기록을 이 기기에 저장<small>끄면 화면을 닫는 즉시 사라집니다</small></span><input type="checkbox" id="fSave"></div>
+
+  <h3>화면</h3>
+  <div class="fld"><label>글자 크기 <b id="fsLbl"></b></label><input id="fFs" type="range" min="15" max="40" step="1"></div>
+
+  <button class="btn pri" id="bClose">저장하고 닫기</button>
+</div></div>
+
+<!-- 기록 -->
+<div class="modal" id="mRec"><div class="sheet">
+  <h2>📋 통역 기록</h2>
+  <p id="recStat"></p>
+  <button class="btn" id="bTxt">📃 텍스트(.txt) 저장</button>
+  <button class="btn" id="bCsv">📊 엑셀(.csv) 저장</button>
+  <button class="btn danger" id="bClear">🗑️ 기록 지우기</button>
+  <button class="btn danger" id="bWipe">🧹 모든 로컬 데이터 삭제 (설정·기록·모델 캐시)</button>
+  <button class="btn pri" id="bRecClose">닫기</button>
+</div></div>
+
+<script src="core.js"></script>
+<script src="glossary.js"></script>
+<script>
+'use strict';
+/* =====================================================================
+   로컬 동시통역 — API 키·서버 없이 동작
+   ┌ 마이크 ─▶ STT ─▶ 교정(약어·띄어쓰기) ─▶ LocalAgreement ─▶ 절 분할 ─▶ 용어 주입 ─▶ MT ─▶ TTS
+   │  STT : Web Speech(기기 내/기본, 문구 가중치·대안 재순위)
+   │        또는 Whisper 2단계(초안 tiny 스트리밍 → 확정 base/small) + 용어 프롬프트
+   │  MT  : Chrome Translator(기기 내) / Opus-MT(방향 전용·경량) / M2M100·NLLB(다국어)
+   └  TTS : speechSynthesis (기기 내 음성 우선)
+   ===================================================================== */
+const C = window.InterpCore, L = C.LANGS;
+const $ = id => document.getElementById(id);
+const UA = navigator.userAgent || '';
+const IS_IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1);
+
+/* ---------------- 설정 ---------------- */
+const DEF = { myLang:'ko', partnerLang:'en', dirMode:'manual', layout:'stack', asr:'auto', mt:'auto',
+  wModel:'auto', wCustom:'', device:'auto', twoPass:'auto', prompt:true, multi:'auto', opus:'auto',
+  aggr:'normal', agreeN:2, preview:true, endMs:650,
+  ttsA:true, ttsB:true, audioOut:true, rate:1.05, adapt:true, echo:'speaker',
+  gloss:true, userGl:'', strict:false, saveHist:true, fs:20, flip:false };
+const S = Object.assign({}, DEF);
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
+function loadSettings(){
+  try{ Object.assign(S, JSON.parse(lsGet('li_set')||'{}')); }catch(e){}
+  if(!L[S.myLang]) S.myLang='ko';
+  if(!L[S.partnerLang]) S.partnerLang='en';
+  if(S.mt==='nllb') S.mt='local';                       // 이전 버전 설정 호환
+  if(S.nllb && S.multi==='auto') { S.multi=S.nllb; delete S.nllb; }
+}
+function saveSettings(){ lsSet('li_set', JSON.stringify(S)); }
+const srcOf = role => role==='A' ? S.myLang : S.partnerLang;
+const tgtOf = role => role==='A' ? S.partnerLang : S.myLang;
+const roleOfLang = lang => lang===S.myLang ? 'A' : 'B';
+const short = id => String(id||'').split('/').pop().replace(/^whisper-/,'').replace(/-ONNX$/i,'');
+
+/* ---------------- 유틸 ---------------- */
+let toastT=null;
+function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),3600); }
+const seen={};
+function toastOnce(k,m,ms){ const n=Date.now(); if(seen[k] && n-seen[k]<(ms||20000)) return; seen[k]=n; toast(m); }
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+const pad = n => String(n).padStart(2,'0');
+function fatal(msg){ const e=new Error(msg); e.fatal=true; return e; }
+function fmtMB(b){ return (b/1048576).toFixed(b>1e8?0:1)+'MB'; }
+
+/* ---------------- 기기 성능 프로파일 ---------------- */
+let DEV=null;
+async function device(){
+  if(DEV) return DEV;
+  const mobile = (navigator.userAgentData && typeof navigator.userAgentData.mobile==='boolean')
+    ? (navigator.userAgentData.mobile || IS_IOS) : (/Android|iPhone|iPad|iPod|Mobile/i.test(UA) || IS_IOS);
+  let webgpu=false, gpuName='';
+  if(navigator.gpu){
+    try{ const ad=await navigator.gpu.requestAdapter(); webgpu=!!ad; if(ad && ad.info) gpuName=ad.info.vendor||''; }catch(e){}
+  }
+  const f={mobile, webgpu, cores:navigator.hardwareConcurrency||4, mem:navigator.deviceMemory||(mobile?4:8), isolated:!!self.crossOriginIsolated};
+  DEV=Object.assign(C.devicePlan(f), f, {gpuName});
+  return DEV;
+}
+
+/* ---------------- 진행률 표시 (모델 다운로드, 동시 로드 지원) ---------------- */
+const PROG = {
+  files:{}, label:'', active:0,
+  start(label){ if(!this.active) this.files={}; this.active++; this.label=label; $('prog').style.display='block'; this.draw(); },
+  update(p){
+    if(!p || !p.file) return;
+    if(p.status==='progress' || p.status==='done'){
+      const f=this.files[p.file]||(this.files[p.file]={loaded:0,total:0});
+      if(p.total) f.total=p.total;
+      f.loaded = p.status==='done' ? (f.total||f.loaded) : (p.loaded||0);
+      this.draw();
+    }
+  },
+  frac(label, x){ this.label=label; $('prog').style.display='block'; $('progFill').style.width=Math.round(x*100)+'%'; $('progLbl').textContent=label+' '+Math.round(x*100)+'%'; },
+  draw(){
+    let l=0,t=0; Object.values(this.files).forEach(f=>{ l+=f.loaded; t+=f.total; });
+    const pct = t ? Math.min(100, l/t*100) : 0;
+    $('progFill').style.width=pct.toFixed(1)+'%';
+    $('progLbl').textContent=this.label+(t?' · '+fmtMB(l)+' / '+fmtMB(t)+' ('+pct.toFixed(0)+'%)':' · 준비 중…')+' — 최초 1회만 받고 이후 기기에 저장됩니다';
+  },
+  end(){ this.active=Math.max(0,this.active-1); if(!this.active) $('prog').style.display='none'; },
+  hide(){ if(!this.active) $('prog').style.display='none'; }
+};
+
+/* =====================================================================
+   모델 워커 (worker.mjs + engine.mjs) — 슬롯별로 여러 모델을 동시에 유지
+   ===================================================================== */
+class ModelWorker{
+  constructor(name){ this.name=name; this.w=null; this.seq=0; this.pend=new Map(); this.keys={}; this.dev={}; this.loading={}; }
+  spawn(){
+    if(this.w) return;
+    this.w=new Worker('worker.mjs',{type:'module', name:this.name});
+    this.w.onmessage=e=>{
+      const m=e.data;
+      if(m.type==='progress'){ PROG.update(m.p); return; }
+      if(m.type==='boot') return;
+      const p=this.pend.get(m.id); if(!p) return;
+      this.pend.delete(m.id);
+      m.type==='err' ? p.rej(new Error(m.error)) : p.res(m);
+    };
+    this.w.onerror=e=>{
+      const err=new Error('모델 워커 오류: '+(e.message||'모듈 로드 실패 (네트워크/CSP 확인)'));
+      this.pend.forEach(p=>p.rej(err)); this.pend.clear();
+      this.kill();
+    };
+    // WASM 멀티스레드 (crossOriginIsolated 일 때) — 첫 모델 로드 전에 설정해야 적용됨
+    this.call({type:'config', numThreads: DEV ? DEV.numThreads : 1}).catch(()=>{});
+  }
+  call(msg, transfer){
+    this.spawn();
+    const id=++this.seq;
+    return new Promise((res,rej)=>{ this.pend.set(id,{res,rej}); this.w.postMessage(Object.assign({},msg,{id}), transfer||[]); });
+  }
+  has(slot){ return !!this.keys[slot]; }
+  async load(slot, task, model, tries, label, extra){
+    const key=task+'|'+model+'|'+JSON.stringify(tries);
+    if(this.keys[slot]===key) return this.dev[slot];
+    if(this.loading[slot] && this.loading[slot].key===key) return this.loading[slot].p;
+    PROG.start(label);
+    const p=(async()=>{
+      try{
+        const r=await this.call(Object.assign({type:'load', slot, task, model, tries, warmup:true}, extra||{}));
+        this.keys[slot]=key; this.dev[slot]=r.device; return r.device;
+      }finally{ PROG.end(); delete this.loading[slot]; }
+    })();
+    this.loading[slot]={key,p};
+    return p;
+  }
+  kill(){ if(this.w){ try{ this.w.terminate(); }catch(e){} } this.w=null; this.keys={}; this.dev={}; this.loading={}; }
+}
+const asrW=new ModelWorker('asr'), mtW=new ModelWorker('mt');
+
+/* ---------------- Whisper 모델 선택 ---------------- */
+function wTries(){
+  const ds = S.device==='auto' ? (DEV.webgpu ? ['webgpu','wasm'] : ['wasm']) : [S.device];
+  return ds.map(d=> d==='webgpu'
+    ? {device:'webgpu', dtype:{encoder_model:'fp32', decoder_model_merged:'q4'}}
+    : {device:'wasm', dtype:'q8'});
+}
+function asrModels(){
+  const final = S.wModel==='custom' ? (S.wCustom.trim()||DEV.asrFinal) : S.wModel==='auto' ? DEV.asrFinal : S.wModel;
+  const two = S.twoPass==='on' || (S.twoPass==='auto' && !!DEV.asrDraft);
+  const draft = two ? (DEV.asrDraft || 'onnx-community/whisper-tiny') : null;
+  return { final, draft: draft && draft!==final ? draft : null };
+}
+const ASR_TASK='automatic-speech-recognition';
+async function loadWhisper(){
+  await device();
+  const {final, draft} = asrModels();
+  if(draft){
+    const d=await asrW.load('fast', ASR_TASK, draft, wTries(), '음성 인식 초안 모델 ('+short(draft)+')');
+    // 정밀 모델은 백그라운드에서 — 준비 전까지는 초안 모델이 확정까지 담당 (시작 대기 최소화)
+    asrW.load('acc', ASR_TASK, final, wTries(), '정밀 인식 모델 ('+short(final)+')')
+      .then(()=>{ toastOnce('acc','✅ 정밀 인식 모델 준비 완료 ('+short(final)+')'); app.render(); })
+      .catch(e=>toastOnce('accf','⚠️ 정밀 모델 로드 실패 — 초안 모델로 계속: '+e.message));
+    return d;
+  }
+  return asrW.load('acc', ASR_TASK, final, wTries(), '음성 인식 모델 ('+short(final)+')');
+}
+const partialSlot = () => asrW.has('fast') ? 'fast' : 'acc';
+const finalSlot = () => asrW.has('acc') ? 'acc' : 'fast';
+
+/* =====================================================================
+   번역 라우터 — Chrome 내장(직접/영어 경유) 또는 오픈 모델(방향 전용 Opus-MT / 다국어)
+   ===================================================================== */
+const MT = {
+  engine:null, inst:new Map(), plans:new Map(), routes:new Map(), cache:new Map(), stat:new C.Stat(0.3),
+  api(){ return self.Translator || (self.ai && self.ai.translator) || null; },
+  async avail(s,t){
+    const T=this.api(); if(!T || !T.availability) return 'unavailable';
+    try{ return await T.availability({sourceLanguage:s, targetLanguage:t}); }catch(e){ return 'unavailable'; }
+  },
+  async plan(s,t){
+    const k=s+'>'+t; if(this.plans.has(k)) return this.plans.get(k);
+    let p=null;
+    if(await this.avail(s,t)!=='unavailable') p={kind:'direct'};
+    else if(s!=='en' && t!=='en' && await this.avail(s,'en')!=='unavailable' && await this.avail('en',t)!=='unavailable') p={kind:'pivot'};
+    this.plans.set(k,p); return p;
+  },
+  async get(s,t){
+    const k=s+'>'+t; if(this.inst.has(k)) return this.inst.get(k);
+    const T=this.api();
+    const pr=T.create({sourceLanguage:s, targetLanguage:t, monitor(m){
+      m.addEventListener('downloadprogress', e=>PROG.frac('Chrome 번역 언어팩 '+s+'→'+t, e.loaded||0));
+    }});
+    this.inst.set(k,pr);
+    try{ const v=await pr; PROG.hide(); return v; }catch(e){ this.inst.delete(k); PROG.hide(); throw e; }
+  },
+  /* ---- 오픈 모델 경로 ---- */
+  multiModel(){ return S.multi==='auto' ? DEV.mtMulti : S.multi; },
+  multiCode(l){ return /m2m100/i.test(this.multiModel()) ? l : L[l].nllb; },
+  useOpus(){ return S.opus==='on' || (S.opus==='auto' && (DEV.mobile || DEV.tier==='low')); },
+  opusId(s,t){ return 'Xenova/opus-mt-'+s+'-'+t; },
+  // 방향 전용 모델 존재 여부: Hugging Face 에 설정 파일이 있는지 HEAD 요청으로 확인 (결과는 기기에 캐시)
+  async opusExists(s,t){
+    const k='li_opus_'+s+'-'+t, c=lsGet(k);
+    if(c==='1') return true; if(c==='0') return false;
+    try{
+      const r=await fetch('https://huggingface.co/'+this.opusId(s,t)+'/resolve/main/config.json',{method:'HEAD', credentials:'omit', cache:'no-store', referrerPolicy:'no-referrer'});
+      if(r.status===200 || r.status===404 || r.status===401){ lsSet(k, r.ok?'1':'0'); }
+      return r.ok;
+    }catch(e){ return false; }
+  },
+  async route(s,t){
+    const k=s+'>'+t; if(this.routes.has(k)) return this.routes.get(k);
+    let r={kind:'multi'};
+    if(this.useOpus()){
+      if(await this.opusExists(s,t)) r={kind:'opus', a:{slot:'mt:'+s+'-'+t, model:this.opusId(s,t)}};
+      else if(s!=='en' && t!=='en' && await this.opusExists(s,'en') && await this.opusExists('en',t))
+        r={kind:'opus2', a:{slot:'mt:'+s+'-en', model:this.opusId(s,'en')}, b:{slot:'mt:en-'+t, model:this.opusId('en',t)}};
+    }
+    this.routes.set(k,r); return r;
+  },
+  loadOpus(x){ return mtW.load(x.slot, 'translation', x.model, [{device:'wasm', dtype:'q8'}], '번역 모델 ('+short(x.model)+')'); },
+  loadMulti(s,t){ return mtW.load('mt', 'translation', this.multiModel(), [{device:'wasm', dtype:'q8'}], '번역 모델 ('+short(this.multiModel())+')', {warmArgs:{src_lang:this.multiCode(s), tgt_lang:this.multiCode(t)}}); },
+  async prepare(engine, pairs){
+    this.engine=engine;
+    await device();
+    if(engine==='chrome'){
+      for(const [s,t] of pairs){
+        const p=await this.plan(s,t);
+        if(!p) throw fatal('Chrome 내장 번역이 '+L[s].name+'→'+L[t].name+' 을 지원하지 않습니다');
+        if(p.kind==='direct') await this.get(s,t); else { await this.get(s,'en'); await this.get('en',t); }
+      }
+      return;
+    }
+    for(const [s,t] of pairs){
+      const r=await this.route(s,t);
+      if(r.kind==='opus') await this.loadOpus(r.a);
+      else if(r.kind==='opus2'){ await this.loadOpus(r.a); await this.loadOpus(r.b); }
+      else await this.loadMulti(s,t);
+    }
+  },
+  describe(){
+    if(this.engine==='chrome') return 'Chrome 내장 번역';
+    const names=new Set();
+    this.routes.forEach(r=>{ if(r.kind==='multi') names.add(short(this.multiModel())); else names.add('Opus-MT'); });
+    return [...names].join('+') || short(this.multiModel());
+  },
+  async raw(text,s,t){
+    if(this.engine==='chrome'){
+      const p=await this.plan(s,t);
+      if(p && p.kind==='pivot'){ const mid=await (await this.get(s,'en')).translate(text); return (await this.get('en',t)).translate(mid); }
+      return (await this.get(s,t)).translate(text);
+    }
+    const r=await this.route(s,t);
+    if(r.kind==='opus'){ await this.loadOpus(r.a); return (await mtW.call({type:'mt', slot:r.a.slot, text})).text; }
+    if(r.kind==='opus2'){
+      await this.loadOpus(r.a); await this.loadOpus(r.b);
+      const mid=(await mtW.call({type:'mt', slot:r.a.slot, text})).text;
+      return (await mtW.call({type:'mt', slot:r.b.slot, text:mid})).text;
+    }
+    await this.loadMulti(s,t);
+    return (await mtW.call({type:'mt', slot:'mt', text, src:this.multiCode(s), tgt:this.multiCode(t)})).text;
+  },
+  async translate(text,s,t){
+    const k=s+'|'+t+'|'+text;
+    if(this.cache.has(k)){ const v=this.cache.get(k); this.cache.delete(k); this.cache.set(k,v); return v; }
+    const t0=performance.now();
+    const out=String(await this.raw(text,s,t)||'').trim();
+    this.stat.push(performance.now()-t0);
+    this.cache.set(k,out); if(this.cache.size>600) this.cache.delete(this.cache.keys().next().value);
+    return out;
+  },
+  reset(){ this.routes.clear(); this.plans.clear(); }
+};
+
+/* =====================================================================
+   음성 합성 — 기기 내 음성 우선, 대기열이 밀리면 가속
+   ===================================================================== */
+const TTS = {
+  q:[], cur:null, curAt:0, lastEnd:0, recent:[], voices:[],
+  init(){
+    if(!('speechSynthesis' in window)) return;
+    const load=()=>{ this.voices=speechSynthesis.getVoices()||[]; };
+    load(); speechSynthesis.onvoiceschanged=load;
+    setInterval(()=>{ // 일부 브라우저에서 onend 가 오지 않는 문제 대비
+      if(this.cur && Date.now()-this.curAt>1200 && !speechSynthesis.speaking && !speechSynthesis.pending) this.done(this.cur);
+    },700);
+  },
+  // iOS 는 사용자 터치 안에서 한 번 말해야 이후 자동 낭독이 허용된다
+  unlock(){ if(!IS_IOS || !('speechSynthesis' in window)) return; try{ const u=new SpeechSynthesisUtterance(' '); u.volume=0; speechSynthesis.speak(u); }catch(e){} },
+  voice(lang){
+    if(!this.voices.length && 'speechSynthesis' in window) this.voices=speechSynthesis.getVoices()||[];
+    const bcp=L[lang].bcp.toLowerCase();
+    const vs=this.voices.filter(v=>v.lang && v.lang.toLowerCase().replace('_','-').split('-')[0]===lang);
+    vs.sort((a,b)=>(b.localService-a.localService)||((b.lang.toLowerCase()===bcp)-(a.lang.toLowerCase()===bcp)));
+    return S.strict ? (vs.find(v=>v.localService)||null) : (vs[0]||null);
+  },
+  backlog(){ return this.q.reduce((n,x)=>n+x.text.length,0); },
+  busy(){ return !!this.cur || this.q.length>0; },
+  echoWindow(){ return S.echo==='speaker' && (this.busy() || Date.now()-this.lastEnd<450); },
+  say(text,lang){
+    if(!('speechSynthesis' in window) || !text.trim()) return;
+    this.q.push({text,lang});
+    this.recent.push(text); if(this.recent.length>10) this.recent.shift();
+    this.pump();
+  },
+  pump(){
+    if(this.cur || !this.q.length) return;
+    const it=this.q.shift();
+    const v=this.voice(it.lang);
+    if(!v && S.strict){ toastOnce('nv'+it.lang, '🔇 '+L[it.lang].name+' 기기 내 음성이 없어 낭독을 건너뜁니다 (OS 설정에서 음성 설치)'); return this.pump(); }
+    const u=new SpeechSynthesisUtterance(it.text);
+    u.lang=L[it.lang].bcp; if(v) u.voice=v;
+    u.rate = S.adapt ? C.adaptiveRate(S.rate, this.backlog()+it.text.length, it.lang) : S.rate;
+    u.onend=u.onerror=()=>this.done(u);
+    this.cur=u; this.curAt=Date.now(); app.onTts();
+    try{ speechSynthesis.speak(u); }catch(e){ this.done(u); }
+  },
+  done(u){ if(this.cur!==u) return; this.cur=null; this.lastEnd=Date.now(); app.onTts(); this.pump(); },
+  stop(){ this.q=[]; this.cur=null; this.lastEnd=Date.now(); try{ speechSynthesis.cancel(); }catch(e){} }
+};
+
+/* ---------------- 용어집 / 인식 문맥 ---------------- */
+let GL=[], USERN=0;
+const RECENT=[];            // 최근 대화에 등장한 용어 (프롬프트·가중치 우선순위)
+const PREV={};              // 언어별 직전 확정 발화 (Whisper 문맥)
+function rebuildGlossary(){
+  const user=C.parseUserGlossary(S.userGl);
+  USERN=user.length;
+  GL=C.buildGlossary((self.DEFAULT_TERMS||[]).concat(user));
+}
+function noteTerms(hits){ hits.forEach(g=>{ const i=RECENT.indexOf(g); if(i>=0) RECENT.splice(i,1); RECENT.unshift(g); }); RECENT.length=Math.min(RECENT.length,12); }
+function promptFor(lang){
+  if(!S.prompt) return '';
+  const terms=C.promptTerms(GL, lang, {recent:RECENT, userCount:USERN, max:20});
+  return C.buildPrompt({terms, prev:PREV[lang]||''});
+}
+
+/* =====================================================================
+   STT 엔진 1 — Web Speech API (기기 내 / 브라우저 기본)
+   ===================================================================== */
+class WebSpeechASR{
+  static Ctor(){ return window.SpeechRecognition || window.webkitSpeechRecognition || null; }
+  static async localStatus(lang){
+    const R=this.Ctor(); if(!R) return 'unsupported';
+    const bcp=L[lang].bcp;
+    try{
+      if(typeof R.available==='function') return await R.available({langs:[bcp], processLocally:true});
+      if(typeof R.availableOnDevice==='function') return await R.availableOnDevice(bcp);
+    }catch(e){ return 'unavailable'; }
+    return 'unsupported';
+  }
+  static async install(lang){
+    const R=this.Ctor(), bcp=L[lang].bcp;
+    if(typeof R.install==='function') return await R.install({langs:[bcp], processLocally:true});
+    if(typeof R.installOnDevice==='function') return await R.installOnDevice(bcp);
+    return false;
+  }
+  constructor(local){ this.local=local; this.rec=null; this.on=false; this.lang=null; this.sess=0; this.restarts=[]; this.kind=local?'ws-local':'ws-cloud'; this.noPhrases=false; this.biased=false; }
+  start(lang){ this.on=true; this.lang=lang; this.open(); }
+  // 문맥 가중치(contextual biasing): 용어집을 인식기에 미리 알려 전문용어 인식률을 높인다
+  applyPhrases(r, lang){
+    this.biased=false;
+    if(!S.prompt || this.noPhrases || !('phrases' in r) || typeof window.SpeechRecognitionPhrase!=='function') return;
+    try{
+      const terms=C.promptTerms(GL, lang, {recent:RECENT, userCount:USERN, max:80});
+      r.phrases=terms.map(t=>new window.SpeechRecognitionPhrase(t, 3.0));
+      this.biased=terms.length>0;
+    }catch(e){ this.noPhrases=true; }
+  }
+  open(){
+    const R=WebSpeechASR.Ctor(), r=new R(), sess=++this.sess, lang=this.lang;
+    this.rec=r;
+    r.lang=L[lang].bcp; r.continuous=true; r.interimResults=true; r.maxAlternatives=3;
+    if(this.local){ if('processLocally' in r) r.processLocally=true; else if('mode' in r) r.mode='ondevice-only'; }
+    this.applyPhrases(r, lang);
+    r.onresult=e=>{
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        const res=e.results[i];
+        const alts=Array.from({length:res.length},(_,j)=>({transcript:(res[j]&&res[j].transcript)||'', confidence:(res[j]&&res[j].confidence)||0}));
+        const tx = res.isFinal && alts.length>1 ? C.rerank(alts, lang, GL) : (alts[0] ? alts[0].transcript : '');
+        pipe.hyp('ws'+sess+'_'+i, tx, res.isFinal, {lang, role:roleOfLang(lang)});
+      }
+    };
+    r.onerror=e=>{
+      const er=e.error||'';
+      if(er==='no-speech' || er==='aborted') return;
+      if(er==='phrases-not-supported'){ this.noPhrases=true; return; }   // onend 에서 가중치 없이 재시작
+      if(er==='not-allowed' || er==='service-not-allowed'){ this.on=false; toast('⛔ 마이크 권한이 필요합니다 — 주소창 🔒 → 마이크 허용'); app.stop(); return; }
+      if(er==='language-not-supported'){ this.on=false; toast('⛔ '+L[lang].name+' 인식을 지원하지 않습니다 — 엔진을 Whisper 로 바꾸세요'); app.stop(); return; }
+      if(er==='network'){ toastOnce('wsnet','⚠️ 네트워크 오류 — 브라우저 기본 인식은 인터넷이 필요합니다. 오프라인이면 Whisper 를 쓰세요'); return; }
+      toastOnce('wserr'+er,'⚠️ 음성 인식: '+er);
+    };
+    r.onend=()=>{
+      if(this.rec!==r) return;
+      this.rec=null; pipe.endSession('ws'+sess);
+      if(this.on && !app.paused) this.reopen();
+    };
+    try{ r.start(); }catch(e){ this.rec=null; if(this.on) this.reopen(); }
+  }
+  reopen(){
+    const n=Date.now(); this.restarts=this.restarts.filter(t=>n-t<15000); this.restarts.push(n);
+    if(this.restarts.length>10){ this.on=false; toast('⛔ 음성 인식이 반복해서 끊깁니다 — Whisper 엔진을 사용해 보세요'); app.stop(); return; }
+    setTimeout(()=>{ if(this.on && !this.rec && !app.paused) this.open(); }, this.restarts.length>4?700:80);
+  }
+  setLang(lang){
+    if(lang===this.lang) return;
+    this.lang=lang;
+    const r=this.rec; this.rec=null;
+    if(r){ pipe.endSession('ws'+this.sess); try{ r.abort(); }catch(e){} }
+    if(this.on && !app.paused) this.open();
+  }
+  setPaused(p){
+    if(p){ const r=this.rec; this.rec=null; if(r){ pipe.endSession('ws'+this.sess); try{ r.abort(); }catch(e){} } }
+    else if(this.on && !this.rec) this.open();
+  }
+  stop(){ this.on=false; const r=this.rec; this.rec=null; if(r){ try{ r.stop(); }catch(e){} } pipe.endSession('ws'+this.sess); }
+}
+
+/* =====================================================================
+   STT 엔진 2 — Whisper 스트리밍 (기기 내, 오프라인)
+   VAD 로 발화를 자르고, 말하는 동안 초안 모델로 '지금까지의 발화'를 재인식 →
+   LocalAgreement 로 안정된 앞부분만 확정해 번역으로 보냄. 발화 끝에서 정밀 모델로 확정.
+   ===================================================================== */
+const WORKLET_SRC = `
+class Cap extends AudioWorkletProcessor{
+  constructor(){ super(); this.buf=new Float32Array(1024); this.n=0; }
+  process(inputs){
+    const ch=inputs[0] && inputs[0][0];
+    if(ch){ for(let i=0;i<ch.length;i++){ this.buf[this.n++]=ch[i]; if(this.n===this.buf.length){ this.port.postMessage(this.buf.slice(0)); this.n=0; } } }
+    return true;
+  }
+}
+registerProcessor('cap', Cap);`;
+
+function resample(x, from, to){
+  if(from===to) return x;
+  const r=from/to, n=Math.floor(x.length/r), y=new Float32Array(n);
+  for(let i=0;i<n;i++){ const p=i*r, j=Math.floor(p), f=p-j; y[i]=x[j]*(1-f)+(x[j+1]||x[j])*f; }
+  return y;
+}
+class WhisperASR{
+  constructor(){ this.kind='whisper'; this.ctx=null; this.utt=null; this.pre=[]; this.preLen=0; this.n=0; this.busy=false; this.finals=0; this.chain=Promise.resolve(); this.dec=new C.Stat(0.3); this.decF=new C.Stat(0.3); this.level=0; this.paused=false; this.lastLang=null; }
+  async start(stream){
+    const AC=window.AudioContext||window.webkitAudioContext;
+    try{ this.ctx=new AC({sampleRate:16000}); }catch(e){ this.ctx=new AC(); }
+    this.sr=this.ctx.sampleRate;
+    const src=this.ctx.createMediaStreamSource(stream);
+    // 80Hz 고역 통과: 책상 진동·손 잡음 같은 저주파를 걸러 VAD 오작동 감소 (사람 목소리 기본 주파수는 그 위)
+    const hp=this.ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=80;
+    src.connect(hp);
+    const sink=this.ctx.createGain(); sink.gain.value=0; sink.connect(this.ctx.destination);
+    try{
+      const url=URL.createObjectURL(new Blob([WORKLET_SRC],{type:'text/javascript'}));
+      await this.ctx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
+      const node=new AudioWorkletNode(this.ctx,'cap');
+      node.port.onmessage=e=>this.frame(e.data);
+      hp.connect(node); node.connect(sink); this.node=node;
+    }catch(e){
+      const sp=this.ctx.createScriptProcessor(2048,1,1);
+      sp.onaudioprocess=ev=>this.frame(new Float32Array(ev.inputBuffer.getChannelData(0)));
+      hp.connect(sp); sp.connect(sink); this.node=sp;
+    }
+    if(this.ctx.state==='suspended') await this.ctx.resume();
+    this.vad=new C.Vad({hangMs:S.endMs});
+    this.timer=setInterval(()=>this.tick(),100);
+  }
+  frame(raw){
+    const f=resample(raw, this.sr, 16000);
+    const gated = this.paused || TTS.echoWindow();
+    const r = gated ? 0 : C.rms(f);
+    this.level = r;
+    const ev=this.vad.push(r, performance.now());
+    if(ev==='start'){
+      this.utt={id:'w'+(++this.n), chunks:this.pre.slice(), len:this.preLen, t0:Date.now(), lastDec:0, lastAt:0, lang:null, role:null, peak:0};
+      this.pre=[]; this.preLen=0;
+    }
+    const u=this.utt;
+    if(u){
+      if(!gated){ u.chunks.push(f); u.len+=f.length; u.peak=Math.max(u.peak,r); }
+      if(ev==='end' || u.len>=16000*18) this.endUtt();
+    }else if(!gated){
+      this.pre.push(f); this.preLen+=f.length;
+      while(this.preLen>16000*0.35 && this.pre.length>1){ this.preLen-=this.pre.shift().length; }
+    }
+  }
+  audio(u){ const a=new Float32Array(u.len); let o=0; for(const c of u.chunks){ a.set(c,o); o+=c.length; } return a; }
+  async decide(u){
+    if(u.role) return;
+    if(S.dirMode!=='auto'){ u.role=app.active; u.lang=srcOf(u.role); return; }
+    const cands=[S.myLang, S.partnerLang];
+    try{
+      const r=await asrW.call({type:'lid', slot:finalSlot(), audio:this.audio(u), cands:cands.map(l=>L[l].whisper)});
+      const sc={}; cands.forEach(l=>{ sc[l]=r.scores[L[l].whisper]; });
+      const d=C.decideLang(sc, cands, this.lastLang || srcOf(app.active), 1.0);
+      u.lang=d.lang; u.role=roleOfLang(d.lang);
+    }catch(e){ u.role=app.active; u.lang=srcOf(u.role); toastOnce('lid','⚠️ 언어 자동 판별 실패 — 현재 방향으로 인식합니다'); }
+    this.lastLang=u.lang;
+    app.onAutoRole(u.role);
+  }
+  tick(){
+    const u=this.utt;
+    if(!u || this.busy || this.finals) return;
+    if(u.len<16000*0.7 || u.len-u.lastDec<16000*0.3) return;
+    const gap=Math.max(DEV.stepMs, (this.dec.v||600)*1.15);
+    if(performance.now()-u.lastAt<gap) return;
+    this.decode(u,false);
+  }
+  async decode(u, final){
+    this.busy=true; u.lastDec=u.len; u.lastAt=performance.now();
+    try{
+      await this.decide(u);
+      const a=this.audio(u), sec=a.length/16000;
+      const slot = final ? finalSlot() : partialSlot();
+      const r=await asrW.call({type:'asr', slot, audio:a, language:L[u.lang].whisper,
+        maxTokens:C.maxTokensFor(sec, u.lang), prompt:promptFor(u.lang), retryNoPrompt:final}, [a.buffer]);
+      (final ? this.decF : this.dec).push(r.ms);
+      let text=C.collapseRepeats(String(r.text||'').trim());
+      if(C.isHallucination(text) || u.peak<0.012) text='';
+      if(final && text) PREV[u.lang]=text;
+      if(text || final) pipe.hyp(u.id, text, final, {lang:u.lang, role:u.role, t0:u.t0, twoPass: final && slot==='acc' && asrW.has('fast')});
+    }catch(e){
+      toastOnce('asr','⚠️ Whisper 인식 오류: '+e.message);
+      if(final) pipe.hyp(u.id,'',true,{lang:u.lang||srcOf(app.active), role:u.role||app.active});
+    }finally{ this.busy=false; }
+  }
+  endUtt(){
+    const u=this.utt; this.utt=null; if(!u) return;
+    this.finals++;
+    this.chain=this.chain.then(async()=>{
+      while(this.busy) await sleep(15);
+      if(u.len>=16000*0.3) await this.decode(u,true);
+      else if(pipe.utts.has(u.id)) pipe.hyp(u.id,'',true,{});
+    }).finally(()=>{ this.finals--; });
+  }
+  setLang(){ /* 다음 발화부터 app.active 기준으로 적용 */ }
+  setPaused(p){ this.paused=p; if(p && this.utt) this.endUtt(); }
+  stop(){
+    if(this.utt) this.endUtt();
+    clearInterval(this.timer);
+    try{ this.node && this.node.disconnect(); }catch(e){}
+    try{ this.ctx && this.ctx.close(); }catch(e){}
+    this.ctx=null;
+  }
+}
+
+/* =====================================================================
+   통역 파이프라인 — 발화(utterance)별 상태
+   ===================================================================== */
+function segOpts(lang){
+  if(S.aggr==='fast') return lang==='ko'?{maxWords:5,minWords:2}:{maxWords:8,minWords:2,maxChars:22};
+  if(S.aggr==='quality') return {maxWords:lang==='ko'?18:28, maxChars:60, clauses:false};
+  return {};
+}
+const STAT={seg:new C.Stat(0.3)};
+let HIST=[];
+
+const pipe = {
+  utts:new Map(), chain:Promise.resolve(), nTyped:0,
+  get(key, meta){
+    let u=this.utts.get(key);
+    if(!u){
+      const src = meta.lang || srcOf(meta.role || app.active);
+      const role = meta.role || roleOfLang(src);
+      u={ key, role, src, tgt: src===S.myLang ? S.partnerLang : S.myLang,
+          ag:new C.Agreement(src, S.agreeN), committed:'', tail:'', emittedW:0, trs:[], preview:'', pvSeq:0,
+          final:false, t0:meta.t0||Date.now(), lat:[], el:null, revised:null, revMark:false,
+          // Whisper 는 낭독 중 마이크 입력 자체를 차단하므로 hold 불필요, 직접 입력도 제외
+          hold: TTS.echoWindow() && app.eng.asr!=='whisper' && !key.startsWith('tx') };
+      this.utts.set(key,u);
+    }
+    return u;
+  },
+  hyp(key, text, isFinal, meta){
+    if(!this.utts.has(key) && !String(text||'').trim()) return;
+    const u=this.get(key, meta||{});
+    if(u.final) return;
+    // 인식 교정: 한글로 받아쓴 약어·용어 띄어쓰기 (용어 강제가 켜져 있을 때)
+    text=String(text||'').trim();
+    if(S.gloss && text) text=C.correctAsr(text, u.src, GL);
+    if(isFinal){
+      u.final=true;
+      const draft=u.committed;
+      u.committed=u.ag.finalize(text || [u.committed,u.tail].filter(Boolean).join(' '));
+      u.tail='';
+      // 2단계 인식: 정밀 모델 확정문이 초안 기반 문장과 크게 다르면 정정 대상
+      if(meta && meta.twoPass && text && draft && C.needsRevision(u.committed, text)) u.revised=text;
+    }else{
+      const r=u.ag.update(text); u.committed=r.committed; u.tail=r.tail;
+    }
+    // 스피커 모드: 낭독 중에 시작된 발화는 확정 시점에 에코 여부를 판정
+    if(u.hold){
+      if(!isFinal) return;
+      if(C.isEcho(u.committed, TTS.recent)){ this.utts.delete(key); return; }
+    }
+    if(!u.committed && !u.tail){ if(u.final){ this.utts.delete(key); view.remove(u); } return; }
+    view.src(u);
+    this.pump(u);
+  },
+  pump(u){
+    const words=C.toks(u.committed,u.src);
+    const rest=C.join(words.slice(u.emittedW),u.src);
+    const r=C.segment(rest,u.src,Object.assign(segOpts(u.src),{final:u.final}));
+    for(const s of r.segments){ u.emittedW+=C.toks(s,u.src).length; this.enqueue(u,s); }
+    if(u.final){ this.chain=this.chain.then(()=>this.finish(u)).catch(e=>console.warn(e)); }
+    else if(S.preview) this.preview(u);
+  },
+  enqueue(u,s){
+    const at=Date.now();
+    this.chain=this.chain.then(()=>this.doSeg(u,s,at)).catch(e=>console.warn(e));
+  },
+  async doSeg(u,s,at){
+    // 에코 2차 방어: 방금 낭독한 문장과 거의 같은 절은 버림
+    if(S.echo==='speaker' && Date.now()-TTS.lastEnd<4000 && C.isEcho(s, TTS.recent, 0.7)){ u.trs.push(''); return; }
+    const g=C.applyGlossary(s,u.src,u.tgt,GL,S.gloss);
+    if(g.hits.length){ chips(g.hits); noteTerms(g.hits); }
+    let out;
+    try{ out=await MT.translate(g.text,u.src,u.tgt); }
+    catch(e){ toastOnce('mt','⚠️ 번역 오류: '+e.message); out='['+s+']'; }
+    out=C.collapseRepeats(out);
+    u.trs.push(out); u.preview=''; u.pvSeq++;
+    const lat=Date.now()-at; u.lat.push(lat); STAT.seg.push(lat);
+    view.tr(u);
+    if(S.audioOut && (u.role==='A'?S.ttsA:S.ttsB)) TTS.say(out,u.tgt);
+  },
+  preview(u){
+    if(u._pv) return;
+    u._pv=setTimeout(async()=>{
+      u._pv=null;
+      if(u.final || (MT.stat.v||0)>650) return;   // 번역이 느린 엔진에서는 미리보기 생략
+      const words=C.toks(u.committed,u.src).slice(u.emittedW).concat(C.toks(u.tail,u.src));
+      if(words.length<2) { if(u.preview){ u.preview=''; view.tr(u);} return; }
+      const seq=++u.pvSeq;
+      try{
+        const o=await MT.translate(C.applyGlossary(C.join(words,u.src),u.src,u.tgt,GL,S.gloss).text,u.src,u.tgt);
+        if(seq!==u.pvSeq || u.final) return;
+        // mask-k: 뒤쪽 2단어는 바뀌기 쉬우므로 숨김 (Arivazhagan et al., 2020)
+        const ot=C.toks(o,u.tgt); u.preview = ot.length>4 ? C.join(ot.slice(0,-2),u.tgt)+' …' : '';
+        view.tr(u);
+      }catch(e){}
+    },260);
+  },
+  async finish(u){
+    this.utts.delete(u.key);
+    if(u.revised){
+      // 정밀 모델이 고친 문장 전체를 다시 번역해 화면·기록을 정정 (이미 낭독한 음성은 그대로)
+      try{
+        const g=C.applyGlossary(u.revised,u.src,u.tgt,GL,S.gloss);
+        const t2=C.collapseRepeats(await MT.translate(g.text,u.src,u.tgt));
+        if(t2){ u.trs=[t2]; u.revMark=true; }
+      }catch(e){}
+      u.committed=u.revised;
+    }
+    const tr=u.trs.filter(Boolean).join(' ');
+    if(!u.committed.trim()) { view.remove(u); return; }
+    view.src(u); view.tr(u);
+    const e={t:u.t0, role:u.role, src:u.src, tgt:u.tgt, text:u.committed, tr, lat:u.lat.length?Math.round(u.lat.reduce((a,b)=>a+b,0)/u.lat.length):''};
+    HIST.push(e); if(HIST.length>3000) HIST=HIST.slice(-3000);
+    if(S.saveHist) lsSet('li_hist', JSON.stringify(HIST));
+  },
+  endSession(prefix){
+    for(const [k,u] of [...this.utts]) if(k.startsWith(prefix+'_') && !u.final) this.hyp(k,[u.committed,u.tail].filter(Boolean).join(' '),true,{});
+  },
+  endAll(){ for(const [k,u] of [...this.utts]) if(!u.final) this.hyp(k,[u.committed,u.tail].filter(Boolean).join(' '),true,{}); },
+  typed(text){
+    const role=app.active, k='tx'+(++this.nTyped)+'_0';
+    this.hyp(k, text, true, {lang:srcOf(role), role});
+  }
+};
+
+/* ---------------- 화면 ---------------- */
+const view = {
+  // 대면 모드: 상대가 읽을 내용(내 말의 통역, 상대 말의 원문)은 위쪽(회전), 내가 읽을 내용은 아래쪽
+  pane(u, kind){
+    if(S.layout!=='face') return kind==='src' ? $('sSrc') : $('sTrans');
+    const partnerSide = (u.role==='A') === (kind==='tr');
+    return partnerSide ? $('sTrans') : $('sSrc');
+  },
+  mk(u, kind){
+    const pane=this.pane(u,kind);
+    const d=document.createElement('div'); d.className='ln '+u.role;
+    const tag=document.createElement('span'); tag.className='tag';
+    tag.textContent=(u.role==='A'?'나':'상대')+' · '+(kind==='src'?L[u.src].name:L[u.tgt].name);
+    const c=document.createElement('span'), t=document.createElement('span');
+    t.className=kind==='src'?'t':'p';
+    d.append(tag,c,t); pane.appendChild(d);
+    while(pane.children.length>80) pane.removeChild(pane.firstChild);
+    const e=$('emptyMsg'); if(e) e.remove();
+    return {d,c,t,tag,pane};
+  },
+  ensure(u){ if(!u.el) u.el={s:this.mk(u,'src'), r:this.mk(u,'tr')}; },
+  src(u){ this.ensure(u); u.el.s.c.textContent=u.committed; u.el.s.t.textContent=u.tail?(u.committed?' ':'')+u.tail:''; this.scroll(u.el.s.pane);
+    if(!u.trs.length && !u.preview) this.tr(u); },
+  tr(u){ this.ensure(u); const t=u.trs.filter(Boolean).join(' '); u.el.r.c.textContent=t;
+    u.el.r.t.textContent = u.preview ? (t?' ':'')+u.preview : (!t && u.final===false ? '…' : '');
+    if(u.revMark){ u.el.r.tag.textContent='✎ '+u.el.r.tag.textContent.replace(/^✎ /,''); u.el.r.d.title='정밀 인식으로 정정됨'; }
+    this.scroll(u.el.r.pane); },
+  remove(u){ if(u.el){ u.el.s.d.remove(); u.el.r.d.remove(); u.el=null; } },
+  scroll(p){ p.scrollTop=p.scrollHeight; },
+  hist(e){
+    const u={role:e.role, src:e.src, tgt:e.tgt};
+    const s=this.mk(u,'src'), r=this.mk(u,'tr');
+    s.c.textContent=e.text; r.c.textContent=e.tr||'';
+  },
+  redraw(){
+    $('sSrc').textContent=''; $('sTrans').textContent='';
+    HIST.slice(-40).forEach(e=>{ if(L[e.src]&&L[e.tgt]) this.hist(e); });
+    pipe.utts.forEach(u=>{ u.el=null; if(u.committed||u.tail){ this.src(u); this.tr(u); } });
+  }
+};
+function chips(hits){
+  const box=$('chips'); box.textContent='';
+  hits.slice(0,4).forEach(g=>{
+    const c=document.createElement('span'); c.className='chip';
+    c.textContent=(g.code&&g.code!==g.ko?g.code+' · ':'')+g.ko+' = '+g.en+(g.cs?' = '+g.cs:'');
+    box.appendChild(c);
+  });
+}
+
+/* =====================================================================
+   앱 제어
+   ===================================================================== */
+const app = {
+  running:false, starting:false, paused:false, active:'A', stream:null, asr:null, eng:{asr:null,mt:null}, startAt:0, wake:null,
+
+  async resolve(){
+    await device();
+    const pairs=[[S.myLang,S.partnerLang],[S.partnerLang,S.myLang]];
+    // --- 번역 엔진 ---
+    let mt=S.mt;
+    if(mt==='auto' || mt==='chrome'){
+      const ok = MT.api() && (await MT.plan(...pairs[0])) && (await MT.plan(...pairs[1]));
+      if(ok) mt='chrome';
+      else if(S.mt==='chrome') throw fatal('Chrome 내장 번역을 쓸 수 없습니다 (데스크톱 Chrome 138+ 필요) — 번역 엔진을 오픈 모델로 바꾸세요');
+      else mt='local';
+    }
+    // --- 음성 인식 엔진 ---
+    let asr=S.asr;
+    if(S.dirMode==='auto' && asr!=='whisper'){ asr='whisper'; toastOnce('autoW','자동 화자 감지는 Whisper 엔진으로 동작합니다'); }
+    const okLocal = s => s==='available'||s==='downloadable'||s==='downloading'||s==='readily'||s==='after-download';
+    if(asr==='auto'){
+      if(WebSpeechASR.Ctor()){
+        const a=await WebSpeechASR.localStatus(S.myLang), b=await WebSpeechASR.localStatus(S.partnerLang);
+        asr = (okLocal(a)&&okLocal(b)) ? 'ws-local' : (S.strict ? 'whisper' : 'ws-cloud');
+      }else asr='whisper';
+    }
+    if(asr==='ws-cloud' && S.strict) throw fatal('완전 로컬 모드에서는 브라우저 기본(클라우드) 음성 인식을 쓸 수 없습니다');
+    if((asr==='ws-local'||asr==='ws-cloud') && !WebSpeechASR.Ctor()) throw fatal('이 브라우저는 Web Speech 인식을 지원하지 않습니다 — Whisper 를 선택하세요');
+    if(asr==='ws-local'){
+      for(const l of [S.myLang,S.partnerLang]){
+        const st=await WebSpeechASR.localStatus(l);
+        if(st==='available'||st==='readily') continue;
+        if(!okLocal(st)){ if(S.asr==='ws-local') throw fatal(L[l].name+' 기기 내 인식을 지원하지 않습니다 ('+st+')'); asr=S.strict?'whisper':'ws-cloud'; break; }
+        setStatus('📦 '+L[l].name+' 음성 인식 언어팩 설치 중…');
+        let ok=false; try{ ok=await WebSpeechASR.install(l); }catch(e){ ok=false; }
+        if(!ok){ if(S.asr==='ws-local') throw fatal(L[l].name+' 언어팩 설치 실패'); asr=S.strict?'whisper':'ws-cloud'; break; }
+      }
+    }
+    this.eng={asr,mt}; renderPriv();
+    return pairs;
+  },
+
+  async start(){
+    if(this.running||this.starting) return;
+    if(S.myLang===S.partnerLang){ toast('내 언어와 상대 언어가 같습니다 (⚙️ 설정)'); openSet(); return; }
+    this.starting=true; this.render();
+    TTS.unlock();
+    try{
+      try{ navigator.storage && navigator.storage.persist && navigator.storage.persist(); }catch(e){}
+      setStatus('🔍 이 기기의 엔진 점검 중…');
+      const pairs=await this.resolve();
+      setStatus('📦 번역 엔진 준비 중…');
+      // 번역 모델 로드와 인식 모델 로드를 병렬로 (워커가 서로 다름)
+      const mtReady=MT.prepare(this.eng.mt, pairs).catch(e=>{
+        if(e && e.name==='NotAllowedError') throw fatal('번역 언어팩 다운로드는 버튼을 누른 직후에만 시작됩니다 — ⚙️ 설정 → "번역 모델 미리 받기"를 눌러 주세요');
+        throw e;
+      });
+      mtReady.catch(()=>{});   // 아래에서 기다림 — 처리되지 않은 거부 경고 방지
+      if(this.eng.asr==='whisper'){
+        // getUserMedia 는 iOS 에서 사용자 터치 직후에 호출해야 하므로 먼저 연다
+        this.stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});
+        setStatus('📦 음성 인식 모델 준비 중…');
+        const [dev]=await Promise.all([loadWhisper(), mtReady]);
+        setStatus('🎤 마이크 연결 중… (Whisper · '+dev+')');
+        this.asr=new WhisperASR(); await this.asr.start(this.stream);
+      }else{
+        await mtReady;
+        this.asr=new WebSpeechASR(this.eng.asr==='ws-local');
+        this.asr.start(srcOf(this.active));
+      }
+      this.running=true; this.paused=false; this.startAt=Date.now();
+      this.reqWake();
+    }catch(e){
+      console.warn(e);
+      const msg=(e&&e.name==='NotAllowedError')?'마이크 권한이 거부되었습니다 — 주소창 🔒 → 마이크 허용':(e&&e.message)||String(e);
+      toast('⛔ '+msg); setStatus('⛔ '+msg);
+      this.cleanup();
+    }finally{
+      this.starting=false; this.render();
+    }
+  },
+  cleanup(){
+    if(this.asr){ try{ this.asr.stop(); }catch(e){} this.asr=null; }
+    if(this.stream){ this.stream.getTracks().forEach(t=>{ try{ t.stop(); }catch(e){} }); this.stream=null; }
+    this.running=false; this.paused=false;
+  },
+  async stop(){
+    if(!this.running) return;
+    this.cleanup();
+    pipe.endAll(); TTS.stop(); this.relWake();
+    $('lvlBar').style.width='0';
+    this.render();
+  },
+  setActive(role){
+    if(this.active===role) return;
+    this.active=role;
+    if(this.running && this.asr) this.asr.setLang(srcOf(role));
+    this.render();
+  },
+  onAutoRole(role){ if(this.active!==role){ this.active=role; this.render(); } },
+  togglePause(){
+    if(!this.running) return;
+    this.paused=!this.paused;
+    this.asr && this.asr.setPaused(this.paused);
+    toast(this.paused?'⏸ 마이크 일시정지':'▶ 다시 듣는 중'); this.render();
+  },
+  onTts(){ renderDot(); },
+  async reqWake(){ try{ if('wakeLock' in navigator) this.wake=await navigator.wakeLock.request('screen'); }catch(e){} },
+  relWake(){ try{ this.wake && this.wake.release(); }catch(e){} this.wake=null; },
+
+  render(){
+    const b=$('mainBtn');
+    if(this.starting){ b.textContent='준비 중…'; b.disabled=true; b.classList.remove('stop'); }
+    else if(this.running){ b.textContent='⏹ 통역 종료'; b.disabled=false; b.classList.add('stop'); }
+    else{ b.textContent='▶ 통역 시작'; b.disabled=false; b.classList.remove('stop'); }
+    $('dirA').classList.toggle('on',this.active==='A'); $('dirB').classList.toggle('on',this.active==='B');
+    $('dirA').classList.toggle('auto',S.dirMode==='auto'); $('dirB').classList.toggle('auto',S.dirMode==='auto');
+    $('dirAsub').textContent=L[S.myLang].name+' → '+L[S.partnerLang].name;
+    $('dirBsub').textContent=L[S.partnerLang].name+' → '+L[S.myLang].name;
+    if(S.layout==='face'){
+      $('lblTrans').textContent='상대 화면 · '+L[S.partnerLang].name; $('lblTransR').textContent='';
+      $('lblSrc').textContent='내 화면 · '+L[S.myLang].name; $('lblSrcR').textContent='';
+    }else{
+      $('lblTrans').textContent='통역 → '+L[tgtOf(this.active)].name;
+      $('lblTransR').textContent=S.dirMode==='auto'?'자동 화자 감지':'수동 전환';
+      $('lblSrc').textContent='원문'; $('lblSrcR').textContent='';
+    }
+    $('tPause').textContent=this.paused?'▶ 재개':'⏸ 정지'; $('tPause').classList.toggle('on',this.paused);
+    if(!this.starting){
+      if(this.running) setStatus(engineLine());
+      else if(!$('status').textContent.startsWith('⛔')) setStatus('▶ 시작을 누르면 이 기기의 엔진을 점검하고 바로 통역합니다. API 키가 필요 없습니다.');
+    }
+    renderDot();
+  },
+  tick(){
+    if(!this.running) return;
+    const sec=Math.floor((Date.now()-this.startAt)/1000);
+    const parts=[pad(Math.floor(sec/60))+':'+pad(sec%60)];
+    if(STAT.seg.v!=null) parts.push('절 '+(STAT.seg.v/1000).toFixed(1)+'s');
+    if(MT.stat.v!=null) parts.push('MT '+Math.round(MT.stat.v)+'ms');
+    if(this.asr && this.asr.dec && this.asr.dec.v!=null) parts.push('STT '+Math.round(this.asr.dec.v)+'ms');
+    $('meter').textContent=parts.join(' · ');
+  }
+};
+function setStatus(txt){ $('status').textContent=txt; }
+function engineLine(){
+  let a={'ws-local':'Web Speech(기기 내)','ws-cloud':'Web Speech(브라우저 기본)'}[app.eng.asr]||'';
+  if(app.eng.asr==='whisper'){
+    const {final, draft}=asrModels();
+    a='Whisper '+(draft ? short(draft)+'→'+short(final)+(asrW.has('acc')?'':' (정밀 모델 준비 중)') : short(final))+' · '+(asrW.dev[partialSlot()]||'');
+  }
+  if(app.asr && app.asr.biased) a+=' · 용어 가중치';
+  return '● 통역 중 — 인식: '+a+' · 번역: '+MT.describe()+(app.paused?' · ⏸ 일시정지':'');
+}
+function renderPriv(){
+  const p=$('priv');
+  if(!app.eng.asr){ p.className='priv'; p.textContent='🔒 대기'; p.title='시작 전'; return; }
+  const cloud = app.eng.asr==='ws-cloud';
+  p.className='priv '+(cloud?'cloud':'local');
+  p.textContent = cloud ? '☁️ 인식 일부 클라우드' : '🔒 기기 내 처리';
+  p.title = cloud ? '브라우저 기본 음성 인식은 브라우저 제조사 서버에서 처리될 수 있습니다 (Chrome: Google). 번역·낭독은 기기 내.' : '음성 인식·번역이 모두 이 기기에서 처리됩니다';
+}
+function renderDot(){
+  const d=$('dot'); d.className='dot';
+  if(app.running) d.classList.add(app.paused?'busy':'live');
+  else if(app.starting) d.classList.add('busy');
+}
+setInterval(()=>app.tick(),1000);
+setInterval(()=>{ if(app.running && app.asr && app.asr.kind==='whisper') $('lvlBar').style.width=Math.min(100,app.asr.level*600)+'%'; },100);
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible' && app.running){ app.reqWake(); if(app.asr && app.asr.ctx && app.asr.ctx.state==='suspended') app.asr.ctx.resume().catch(()=>{}); }
+  else if(document.visibilityState==='hidden' && app.running && DEV && DEV.mobile) toastOnce('bg','⚠️ 폰에서는 화면을 끄거나 다른 앱으로 가면 마이크가 멈출 수 있습니다');
+});
+
+/* ---------------- 진단 ---------------- */
+async function diagnose(){
+  const out=$('diagOut'); out.style.display='block'; out.textContent='점검 중…';
+  const D=await device();
+  const L1=[], my=S.myLang, pa=S.partnerLang;
+  L1.push('기기 등급          : '+D.tier+(D.mobile?' (모바일/태블릿)':' (PC)')+' · 코어 '+D.cores+' · 메모리 '+(navigator.deviceMemory?D.mem+'GB':'알 수 없음'));
+  L1.push('보안 컨텍스트(HTTPS): '+(window.isSecureContext?'✅':'❌ — HTTPS 또는 localhost 에서 열어야 마이크 사용 가능'));
+  L1.push('WASM 멀티스레드    : '+(self.crossOriginIsolated?'✅ '+D.numThreads+'스레드':'— 단일 스레드 (서버가 COOP/COEP 헤더를 보내면 빨라짐)'));
+  L1.push('WebGPU             : '+(D.webgpu?'✅ 사용 가능'+(D.gpuName?' ('+D.gpuName+')':''):'❌ 없음 → CPU(WASM)'));
+  const R=WebSpeechASR.Ctor();
+  L1.push('Web Speech 인식    : '+(R?'✅ 있음':'❌ 없음'));
+  if(R){ for(const l of [my,pa]) L1.push('  └ 기기 내 '+L[l].name+' : '+await WebSpeechASR.localStatus(l)); }
+  L1.push('  └ 문구 가중치     : '+(typeof window.SpeechRecognitionPhrase==='function'?'✅ 지원':'— 미지원 (용어 교정으로 보완)'));
+  const T=MT.api();
+  L1.push('Chrome Translator  : '+(T?'✅ 있음':'❌ 없음 (데스크톱 Chrome 138+ 전용)'));
+  if(T){ for(const [s,t] of [[my,pa],[pa,my]]){ const d=await MT.avail(s,t); let line='  └ '+s+'→'+t+' : '+d; if(d==='unavailable'&&s!=='en'&&t!=='en'){ line+=' / 영어 경유: '+(await MT.avail(s,'en'))+' + '+(await MT.avail('en',t)); } L1.push(line); } }
+  const am=asrModels();
+  L1.push('\n자동 선택 계획');
+  L1.push('  인식(Whisper 사용 시): '+(am.draft?short(am.draft)+' 초안 → '+short(am.final)+' 확정':short(am.final)+' 단일'));
+  L1.push('  번역(오픈 모델 사용 시): '+(MT.useOpus()?'Opus-MT(있는 언어쌍) → ':'')+short(MT.multiModel()));
+  if('speechSynthesis' in window){
+    for(const l of [my,pa]){ const vs=(speechSynthesis.getVoices()||[]).filter(v=>v.lang&&v.lang.toLowerCase().split(/[-_]/)[0]===l); L1.push('낭독 음성 '+L[l].name+' : 기기 내 '+vs.filter(v=>v.localService).length+'개 · 네트워크 '+vs.filter(v=>!v.localService).length+'개'); }
+  }else L1.push('낭독(speechSynthesis): ❌ 없음');
+  try{ const e=await navigator.storage.estimate(); L1.push('저장공간           : 사용 '+fmtMB(e.usage||0)+' / 허용 '+fmtMB(e.quota||0)); }catch(e){}
+  out.textContent=L1.join('\n');
+}
+
+/* ---------------- 기록 / 내보내기 ---------------- */
+function download(text,name,type){
+  const b=new Blob([text],{type}), a=document.createElement('a');
+  a.href=URL.createObjectURL(b); a.download=name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+function fname(ext){ const d=new Date(); return '통역_'+d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'_'+pad(d.getHours())+pad(d.getMinutes())+'.'+ext; }
+function loadHist(){
+  if(!S.saveHist){ HIST=[]; return; }
+  try{ HIST=JSON.parse(lsGet('li_hist')||'[]')||[]; }catch(e){ HIST=[]; }
+  HIST.slice(-40).forEach(e=>{ if(L[e.src]&&L[e.tgt]) view.hist(e); });
+}
+async function wipeAll(){
+  if(!confirm('설정·기록·다운로드한 모델을 모두 삭제할까요?')) return;
+  await app.stop();
+  try{ Object.keys(localStorage).filter(k=>k.startsWith('li_')).forEach(lsDel); }catch(e){}
+  HIST=[];
+  try{ for(const k of await caches.keys()) await caches.delete(k); }catch(e){}
+  asrW.kill(); mtW.kill();
+  toast('모든 로컬 데이터를 삭제했습니다'); setTimeout(()=>location.reload(),800);
+}
+
+/* ---------------- 설정 화면 ---------------- */
+function fillLang(sel,val){ sel.textContent=''; Object.entries(L).forEach(([c,o])=>{ const op=document.createElement('option'); op.value=c; op.textContent=o.name+' ('+c+')'; sel.appendChild(op); }); sel.value=val; }
+function openSet(){
+  fillLang($('fMine'),S.myLang); fillLang($('fPartner'),S.partnerLang);
+  $('fDir').value=S.dirMode; $('fLayout').value=S.layout; $('fAsr').value=S.asr;
+  $('fWModel').value=S.wModel; if(!$('fWModel').value){ $('fWModel').value='custom'; S.wCustom=S.wCustom||S.wModel; }
+  $('fWCustom').value=S.wCustom; $('wCustomRow').style.display=$('fWModel').value==='custom'?'flex':'none';
+  $('fDevice').value=S.device; $('fTwo').value=S.twoPass; $('fPrompt').checked=S.prompt;
+  $('fMt').value=S.mt; $('fMulti').value=S.multi; $('fOpus').value=S.opus; $('fAggr').value=S.aggr;
+  $('fAgree').value=S.agreeN; $('agLbl').textContent=S.agreeN;
+  $('fPreview').checked=S.preview; $('fEnd').value=S.endMs; $('endLbl').textContent=(S.endMs/1000).toFixed(2)+'초';
+  $('fTtsA').checked=S.ttsA; $('fTtsB').checked=S.ttsB; $('fRate').value=S.rate; $('rateLbl').textContent=(+S.rate).toFixed(2)+'x';
+  $('fAdapt').checked=S.adapt; $('fEcho').value=S.echo;
+  $('fGloss').checked=S.gloss; $('fUserGl').value=S.userGl; $('glCnt').textContent=(self.DEFAULT_TERMS||[]).length;
+  $('fStrict').checked=S.strict; $('fSave').checked=S.saveHist;
+  $('fFs').value=S.fs; $('fsLbl').textContent=S.fs+'px';
+  $('diagOut').style.display='none';
+  $('mSet').classList.add('show');
+}
+function readForm(){
+  S.myLang=$('fMine').value; S.partnerLang=$('fPartner').value; S.dirMode=$('fDir').value; S.layout=$('fLayout').value; S.asr=$('fAsr').value;
+  S.wModel=$('fWModel').value; S.wCustom=$('fWCustom').value.trim(); S.device=$('fDevice').value; S.twoPass=$('fTwo').value; S.prompt=$('fPrompt').checked;
+  S.mt=$('fMt').value; S.multi=$('fMulti').value; S.opus=$('fOpus').value;
+  S.aggr=$('fAggr').value; S.agreeN=+$('fAgree').value; S.preview=$('fPreview').checked; S.endMs=+$('fEnd').value;
+  S.ttsA=$('fTtsA').checked; S.ttsB=$('fTtsB').checked; S.rate=+$('fRate').value; S.adapt=$('fAdapt').checked; S.echo=$('fEcho').value;
+  S.gloss=$('fGloss').checked; S.userGl=$('fUserGl').value; S.strict=$('fStrict').checked; S.saveHist=$('fSave').checked; S.fs=+$('fFs').value;
+}
+async function closeSet(){
+  const keys=['myLang','partnerLang','dirMode','asr','wModel','wCustom','device','twoPass','mt','multi','opus','strict','endMs'];
+  const before=JSON.stringify(keys.map(k=>S[k])), layoutBefore=S.layout;
+  readForm();
+  if(!S.saveHist) lsDel('li_hist'); else lsSet('li_hist', JSON.stringify(HIST));
+  saveSettings(); rebuildGlossary(); applyView();
+  if(layoutBefore!==S.layout) view.redraw();
+  $('mSet').classList.remove('show');
+  if(before!==JSON.stringify(keys.map(k=>S[k]))){
+    MT.reset();
+    if(app.running){ toast('설정 변경 — 엔진을 다시 연결합니다'); await app.stop(); await app.start(); }
+  }
+}
+function applyView(){
+  document.documentElement.style.setProperty('--fs',S.fs+'px');
+  document.body.classList.toggle('face', S.layout==='face');
+  $('pTrans').classList.toggle('flip', !!S.flip && S.layout!=='face');
+  $('tFace').classList.toggle('on', S.layout==='face');
+  $('tAudio').textContent=S.audioOut?'🔊 낭독':'🔇 자막만'; $('tAudio').classList.toggle('on',S.audioOut);
+  app.render();
+}
+async function preload(kind){
+  readForm(); saveSettings(); MT.reset(); await device();
+  try{
+    if(kind==='w'){ const d=await loadWhisper(); toast('✅ 인식 모델 준비 완료 ('+d+')'); }
+    else{
+      const pairs=[[S.myLang,S.partnerLang],[S.partnerLang,S.myLang]];
+      const useChrome = S.mt!=='local' && MT.api() && (await MT.plan(...pairs[0])) && (await MT.plan(...pairs[1]));
+      await MT.prepare(useChrome?'chrome':'local', pairs);
+      toast('✅ 번역 준비 완료 ('+MT.describe()+')');
+    }
+  }catch(e){ toast('⛔ '+e.message); }
+}
+
+/* ---------------- 이벤트 ---------------- */
+$('mainBtn').onclick=()=>{ app.running?app.stop():app.start(); };
+$('dirA').onclick=()=>app.setActive('A');
+$('dirB').onclick=()=>app.setActive('B');
+$('setBtn').onclick=openSet;
+$('bClose').onclick=closeSet;
+$('bDiag').onclick=diagnose;
+$('bPreW').onclick=()=>preload('w');
+$('bPreN').onclick=()=>preload('n');
+$('fWModel').onchange=e=>{ $('wCustomRow').style.display=e.target.value==='custom'?'flex':'none'; };
+$('fAgree').oninput=e=>$('agLbl').textContent=e.target.value;
+$('fEnd').oninput=e=>$('endLbl').textContent=(e.target.value/1000).toFixed(2)+'초';
+$('fRate').oninput=e=>$('rateLbl').textContent=(+e.target.value).toFixed(2)+'x';
+$('fFs').oninput=e=>{ $('fsLbl').textContent=e.target.value+'px'; document.documentElement.style.setProperty('--fs',e.target.value+'px'); };
+$('tAudio').onclick=()=>{ S.audioOut=!S.audioOut; if(!S.audioOut) TTS.stop(); saveSettings(); applyView(); };
+$('tPause').onclick=()=>app.togglePause();
+$('tFace').onclick=()=>{ S.layout=S.layout==='face'?'stack':'face'; saveSettings(); applyView(); view.redraw();
+  toast(S.layout==='face'?'👥 대면 모드 — 기기를 눕혀 두고 마주 앉으세요':'기본 화면'); };
+$('tType').onclick=()=>{ const r=$('typeRow'); r.classList.toggle('show'); $('tType').classList.toggle('on'); if(r.classList.contains('show')) $('typeIn').focus(); };
+async function sendTyped(){
+  const v=$('typeIn').value.trim(); if(!v) return;
+  $('typeIn').value='';
+  if(!MT.engine){
+    try{ setStatus('📦 번역 엔진 준비 중…'); await device(); const pairs=[[S.myLang,S.partnerLang],[S.partnerLang,S.myLang]];
+      const ok=MT.api() && S.mt!=='local' && (await MT.plan(...pairs[0])) && (await MT.plan(...pairs[1]));
+      await MT.prepare(ok?'chrome':'local', pairs); app.render(); }
+    catch(e){ toast('⛔ '+e.message); return; }
+  }
+  pipe.typed(v);
+}
+$('typeGo').onclick=sendTyped;
+$('typeIn').addEventListener('keydown',e=>{ if(e.key==='Enter' && !e.isComposing) sendTyped(); });
+$('tExport').onclick=()=>{ $('recStat').textContent='저장된 기록 '+HIST.length+'건'+(S.saveHist?' (이 기기에만 저장)':' (저장 꺼짐 — 이번 화면에만 있음)'); $('mRec').classList.add('show'); };
+$('bTxt').onclick=()=>{ if(!HIST.length) return toast('기록이 없습니다'); download(C.toTxt(HIST),fname('txt'),'text/plain;charset=utf-8'); };
+$('bCsv').onclick=()=>{ if(!HIST.length) return toast('기록이 없습니다'); download(C.toCsv(HIST),fname('csv'),'text/csv;charset=utf-8'); };
+$('bClear').onclick=()=>{ if(!confirm('기록을 모두 지울까요?')) return; HIST=[]; lsDel('li_hist'); $('sSrc').textContent=''; $('sTrans').textContent=''; $('recStat').textContent='저장된 기록 0건'; toast('기록을 지웠습니다'); };
+$('bWipe').onclick=wipeAll;
+$('bRecClose').onclick=()=>$('mRec').classList.remove('show');
+window.addEventListener('beforeunload',()=>{ try{ app.cleanup(); TTS.stop(); }catch(e){} });
+
+/* ---------------- 초기화 ---------------- */
+loadSettings(); rebuildGlossary(); TTS.init(); loadHist(); applyView(); device();
+if(!window.isSecureContext) setStatus('⚠️ HTTPS(또는 localhost) 주소에서만 마이크를 쓸 수 있습니다');
+if('serviceWorker' in navigator && window.isSecureContext){
+  navigator.serviceWorker.register('sw.js').then(()=>{
+    // 정적 호스팅(GitHub Pages 등)에서는 서비스 워커가 COOP/COEP 헤더를 붙여 WASM 멀티스레드를 켠다 → 한 번만 새로고침
+    if(!self.crossOriginIsolated && !sessionStorage.getItem('li_coi')){
+      navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(!self.crossOriginIsolated && !app.running && !app.starting){ sessionStorage.setItem('li_coi','1'); location.reload(); } }, {once:true});
+    }
+  }).catch(()=>{});
+}
+window.__app={app,pipe,MT,TTS,S,asrW,mtW,device:()=>DEV}; // 테스트·디버깅용
+</script>
+</body>
+</html>
