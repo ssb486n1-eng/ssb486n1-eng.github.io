@@ -501,6 +501,64 @@
     }
   }
 
+  /* ---------------- 10) 자동 화자 판단 ----------------
+     Web Speech 는 한 번에 한 언어만 들을 수 있어 '말하기 전에' 언어를 정해야 한다.
+     (1) 대화 순서 예측: 통역 음성이 상대에게 전달(낭독 완료)되면 상대가 답할 차례로 본다.
+         낭독 중·직후 바로 이어 말하면 같은 화자가 계속 말하는 것으로 본다.
+     (2) 문자 검증: 한국어로 듣는데 결과가 라틴 문자(영어)면 상대 발화로 재분류(반대도 동일).
+     Whisper 는 음성으로 언어를 판별하고, (1) 의 예측을 동점 처리 기준(prior)으로 쓴다. */
+  const SCRIPT = { ko: 'hangul', ja: 'kana', zh: 'han', ru: 'cyrillic' };
+  const scriptOf = lang => SCRIPT[lang] || 'latin';
+  function dominantScript(text) {
+    const c = { hangul: 0, kana: 0, han: 0, cyrillic: 0, latin: 0 };
+    for (const ch of String(text || '')) {
+      if (/[\uAC00-\uD7A3\u3131-\u318E]/.test(ch)) c.hangul++;
+      else if (/[\u3040-\u30FF]/.test(ch)) c.kana++;
+      else if (/[\u4E00-\u9FFF]/.test(ch)) c.han++;
+      else if (/[\u0400-\u04FF]/.test(ch)) c.cyrillic++;
+      else if (/[A-Za-z\u00C0-\u024F]/.test(ch)) c.latin++;
+    }
+    if (c.kana) c.kana += c.han;             // 일본어는 한자를 섞어 씀
+    const total = c.hangul + c.kana + c.han + c.cyrillic + c.latin;
+    if (!total) return null;
+    const [script, n] = Object.entries(c).sort((a, b) => b[1] - a[1])[0];
+    return { script, ratio: n / total, letters: total };
+  }
+  // 인식 결과가 듣던 언어와 다른 문자로 나왔으면 그 문자를 쓰는 상대 언어로 재분류
+  function classifyResult(o) {
+    const d = dominantScript(o.text);
+    if (!d || d.letters < 4 || d.ratio < 0.7) return { lang: o.recLang, switched: false };
+    if (d.script === scriptOf(o.recLang)) return { lang: o.recLang, switched: false };
+    const other = o.recLang === o.my ? o.partner : o.my;
+    if (scriptOf(other) === d.script) return { lang: other, switched: true };
+    return { lang: o.recLang, switched: false };
+  }
+  class TurnPredictor {
+    constructor(o) {
+      this.o = Object.assign({ afterTtsMs: 250, gapMs: 1600, noTtsMs: 4000 }, o || {});
+      this.expected = 'A'; this.last = null;
+    }
+    set(role) { this.expected = role; this.last = null; }
+    // 한 발화가 확정됨: 일단 같은 화자가 이어 말할 수 있다고 보고 차례 넘김을 기다림
+    onFinal(role, at, willSpeak) { this.expected = role; this.last = { role, at, willSpeak: !!willSpeak }; }
+    // 주기적으로 호출. 통역 낭독이 끝났거나(낭독 켠 경우) 충분히 조용하면 상대 차례로 넘김
+    tick(at, t) {
+      const l = this.last;
+      if (!l) return { role: this.expected, changed: false };
+      const tt = t || {};
+      if (tt.ttsBusy) return { role: this.expected, changed: false };
+      let readyAt;
+      if (l.willSpeak) {
+        const spoke = (tt.ttsStartAt || 0) > l.at && (tt.ttsEndAt || 0) >= (tt.ttsStartAt || 0);
+        readyAt = spoke ? tt.ttsEndAt + this.o.afterTtsMs : l.at + this.o.noTtsMs;
+      } else readyAt = l.at + this.o.gapMs;
+      if (at < readyAt) return { role: this.expected, changed: false };
+      this.expected = l.role === 'A' ? 'B' : 'A';
+      this.last = null;
+      return { role: this.expected, changed: true };
+    }
+  }
+
   /* ---------------- 내보내기 ---------------- */
   function pad(n) { return String(n).padStart(2, '0'); }
   function hms(ts) { const d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
@@ -523,10 +581,10 @@
   }
 
   return {
-    API: 3,   // index.html 과 짝이 맞는지 확인하는 버전 (기능 추가 시 올림)
+    API: 4,   // index.html 과 짝이 맞는지 확인하는 버전 (기능 추가 시 올림)
     LANGS, toks, join, normTok, Agreement, segment, buildGlossary, parseUserGlossary, findTerms,
     applyGlossary, verifyTerms, isHallucination, collapseRepeats, similarity, isEcho, Stat,
     adaptiveRate, rms, Vad, toTxt, toCsv, hms,
-    correctAsr, acronymKo, promptTerms, buildPrompt, maxTokensFor, decideLang, rerank, devicePlan, needsRevision, FinalDedup,
+    correctAsr, acronymKo, promptTerms, buildPrompt, maxTokensFor, decideLang, rerank, devicePlan, needsRevision, FinalDedup, dominantScript, classifyResult, TurnPredictor,
   };
 });

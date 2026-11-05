@@ -5,7 +5,7 @@
    - 런타임: 배포본은 같은 출처 ./vendor/ (캐시 우선), 개발 환경은 jsDelivr @3.7.6 (캐시 우선)
    - 모델 가중치(Hugging Face)는 transformers.js 가 자체 Cache Storage 에 저장하므로 관여하지 않음
    - 통역 내용은 어떤 요청에도 포함되지 않음 (GET 정적 파일만 캐시) */
-const APP_CACHE = 'li-app-5d98e92';
+const APP_CACHE = 'li-app-dd88f72';
 const RT_CACHE = 'li-runtime-v1';
 const SHELL = ['./', './index.html', './core.js', './glossary.js', './engine.mjs', './worker.mjs', './manifest.webmanifest'];
 const RT_PREFIX = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.6/';

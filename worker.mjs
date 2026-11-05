@@ -2,7 +2,7 @@
    런타임(transformers.js 3.7.6 + ONNX Runtime WASM)은 배포 시 ./vendor/ 에 같은 출처로 함께 올린다
    (GitHub Pages 워크플로가 npm 무결성 검증 후 복사). 개발 환경처럼 vendor 가 없으면 jsDelivr(버전 고정)에서 불러온다.
    같은 출처 런타임 → 외부 스크립트 의존 없음, COOP/COEP 환경에서 WASM 스레드 워커 생성이 확실함 */
-import { createEngine } from './engine.mjs?v=5d98e92';
+import { createEngine } from './engine.mjs?v=dd88f72';
 
 // 런타임을 비동기로 불러오는 동안 도착한 메시지를 잃지 않도록, 수신 함수를 가장 먼저 등록하고 대기열에 쌓는다
 const queue = [];

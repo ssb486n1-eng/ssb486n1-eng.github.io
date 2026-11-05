@@ -140,8 +140,8 @@
 </header>
 
 <div class="dirbar">
-  <button class="dir A on" id="dirA"><div class="t1">🎤 내가 말함</div><div class="t2" id="dirAsub">한국어 → 영어</div></button>
-  <button class="dir B" id="dirB"><div class="t1">👂 상대가 말함</div><div class="t2" id="dirBsub">영어 → 한국어</div></button>
+  <button class="dir A on" id="dirA"><div class="t1" id="dirAt">🎤 내가 말함</div><div class="t2" id="dirAsub">한국어 → 영어</div></button>
+  <button class="dir B" id="dirB"><div class="t1" id="dirBt">👂 상대가 말함</div><div class="t2" id="dirBsub">영어 → 한국어</div></button>
 </div>
 <div id="status">▶ 시작을 누르면 이 기기의 엔진을 점검하고 바로 통역합니다. API 키가 필요 없습니다.</div>
 <div id="prog"><div class="bar"><div class="fill" id="progFill"></div></div><div class="lbl" id="progLbl"></div></div>
@@ -189,10 +189,10 @@
   </div>
   <div class="fld"><label>방향 전환</label>
     <select id="fDir">
-      <option value="manual">수동 — 화자 버튼을 눌러 전환 (모든 엔진)</option>
-      <option value="auto">자동 — 발화마다 언어를 판별해 전환 (Whisper)</option>
+      <option value="auto">자동 — 누가 말하는지 앱이 판단 (권장, 모든 엔진)</option>
+      <option value="manual">수동 — 화자 버튼을 눌러 전환</option>
     </select>
-    <small>자동 모드는 Whisper 언어 토큰 확률을 <b>두 후보 언어로만</b> 비교하고, 차이가 작으면 직전 화자를 유지해 방향이 잘못 뒤집히는 것을 막습니다.</small></div>
+    <small><b>자동</b>: 통역 음성이 상대에게 전달되면 상대 차례로 보고 상대 언어로 듣습니다. 인식 결과가 듣던 언어와 다른 문자(예: 한국어로 듣는데 영어)로 나오면 상대 발화로 바로잡습니다. Whisper 엔진은 음성으로 언어를 직접 판별합니다. 예측이 틀리면 화자 버튼을 눌러 바로잡을 수 있습니다.</small></div>
   <div class="fld"><label>화면 배치</label>
     <select id="fLayout">
       <option value="stack">기본 — 통역(위) / 원문(아래), 태블릿 가로에서는 좌우</option>
@@ -323,8 +323,8 @@
   <button class="btn pri" id="bRecClose">닫기</button>
 </div></div>
 
-<script src="core.js?v=5d98e92"></script>
-<script src="glossary.js?v=5d98e92"></script>
+<script src="core.js?v=dd88f72"></script>
+<script src="glossary.js?v=dd88f72"></script>
 <script>
 'use strict';
 /* =====================================================================
@@ -338,7 +338,7 @@
 const C = window.InterpCore, L = C.LANGS;
 // 캐시 때문에 새 화면(index.html)과 예전 로직(core.js)이 섞이면 오류 대신 1회 새로고침
 (function(){
-  const NEED=3;
+  const NEED=4;
   if((C.API||0) >= NEED){ try{ sessionStorage.removeItem('li_skew'); }catch(e){} return; }
   let tried=false; try{ tried=!!sessionStorage.getItem('li_skew'); sessionStorage.setItem('li_skew','1'); }catch(e){}
   document.addEventListener('DOMContentLoaded',()=>{ const st=document.getElementById('status'); if(st) st.textContent= tried ? '⚠️ 이전 버전 파일이 남아 있습니다 — 잠시 후 다시 열어 주세요' : '🔄 새 버전으로 업데이트 중…'; });
@@ -351,7 +351,7 @@ const IS_IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && navigator
 const IS_ANDROID = /Android/i.test(UA);
 
 /* ---------------- 설정 ---------------- */
-const DEF = { myLang:'ko', partnerLang:'en', dirMode:'manual', layout:'stack', asr:'auto', mt:'auto',
+const DEF = { v:2, myLang:'ko', partnerLang:'en', dirMode:'auto', layout:'stack', asr:'auto', mt:'auto',
   wModel:'auto', wCustom:'', device:'auto', twoPass:'auto', prompt:true, multi:'auto', opus:'auto', wsMode:'auto',
   aggr:'normal', agreeN:2, preview:true, endMs:650,
   ttsA:true, ttsB:true, audioOut:true, rate:1.05, adapt:true, echo:'speaker',
@@ -361,7 +361,10 @@ function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; 
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
 function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
 function loadSettings(){
-  try{ Object.assign(S, JSON.parse(lsGet('li_set')||'{}')); }catch(e){}
+  let saved={}; try{ saved=JSON.parse(lsGet('li_set')||'{}')||{}; }catch(e){}
+  Object.assign(S, saved);
+  // v1 에서는 '수동'이 기본값이라 저장돼 있었을 뿐 → 자동 화자 판단(v2 기본값)으로 1회 이전
+  if(!(saved.v>=2)){ if(S.dirMode==='manual') S.dirMode='auto'; S.v=2; }
   if(!L[S.myLang]) S.myLang='ko';
   if(!L[S.partnerLang]) S.partnerLang='en';
   if(S.mt==='nllb') S.mt='local';                       // 이전 버전 설정 호환
@@ -429,7 +432,7 @@ class ModelWorker{
   constructor(name){ this.name=name; this.w=null; this.seq=0; this.pend=new Map(); this.keys={}; this.dev={}; this.loading={}; }
   spawn(){
     if(this.w) return;
-    this.w=new Worker('worker.mjs?v=5d98e92',{type:'module', name:this.name});
+    this.w=new Worker('worker.mjs?v=dd88f72',{type:'module', name:this.name});
     this.w.onmessage=e=>{
       const m=e.data;
       if(m.type==='progress'){ PROG.update(m.p); return; }
@@ -609,7 +612,7 @@ const MT = {
    음성 합성 — 기기 내 음성 우선, 대기열이 밀리면 가속
    ===================================================================== */
 const TTS = {
-  q:[], cur:null, curAt:0, lastEnd:0, recent:[], voices:[],
+  q:[], cur:null, curAt:0, lastStart:0, lastEnd:0, recent:[], voices:[],
   init(){
     if(!('speechSynthesis' in window)) return;
     const load=()=>{ this.voices=speechSynthesis.getVoices()||[]; };
@@ -645,7 +648,7 @@ const TTS = {
     u.lang=L[it.lang].bcp; if(v) u.voice=v;
     u.rate = S.adapt ? C.adaptiveRate(S.rate, this.backlog()+it.text.length, it.lang) : S.rate;
     u.onend=u.onerror=()=>this.done(u);
-    this.cur=u; this.curAt=Date.now(); app.onTts();
+    this.cur=u; this.curAt=Date.now(); this.lastStart=this.curAt; app.onTts();
     try{ speechSynthesis.speak(u); }catch(e){ this.done(u); }
   },
   done(u){ if(this.cur!==u) return; this.cur=null; this.lastEnd=Date.now(); app.onTts(); this.pump(); },
@@ -704,27 +707,35 @@ class WebSpeechASR{
     }catch(e){ this.noPhrases=true; }
   }
   open(){
+    if(S.dirMode==='auto') this.lang=srcOf(app.active);     // 자동: 다음에 말할 것으로 예측된 화자의 언어로 듣기
     const R=WebSpeechASR.Ctor(), r=new R(), sess=++this.sess, lang=this.lang;
+    this.inSpeech=false;
     this.rec=r;
     r.lang=L[lang].bcp; r.continuous=!this.single; r.interimResults=true; r.maxAlternatives=3;
     let got=false;
     if(this.local){ if('processLocally' in r) r.processLocally=true; else if('mode' in r) r.mode='ondevice-only'; }
     this.applyPhrases(r, lang);
+    r.onspeechstart=()=>{ this.inSpeech=true; };
     r.onresult=e=>{
       for(let i=e.resultIndex;i<e.results.length;i++){
         const res=e.results[i];
         const alts=Array.from({length:res.length},(_,j)=>({transcript:(res[j]&&res[j].transcript)||'', confidence:(res[j]&&res[j].confidence)||0}));
         let tx = res.isFinal && alts.length>1 ? C.rerank(alts, lang, GL) : (alts[0] ? alts[0].transcript : '');
-        const key='ws'+sess+'_'+i;
-        if(tx.trim()) got=true;
+        let key='ws'+sess+'_'+i, rl=lang;
+        if(tx.trim()){ got=true; this.inSpeech=!res.isFinal; }
+        if(S.dirMode==='auto'){
+          // 듣던 언어와 다른 문자로 인식되면(한국어로 듣는데 영어 등) 상대 언어 발화로 재분류
+          const c=C.classifyResult({text:tx, recLang:lang, my:S.myLang, partner:S.partnerLang});
+          if(c.switched){ if(pipe.utts.has(key)) pipe.drop(key); rl=c.lang; key+='~'+rl; }
+        }
         if(res.isFinal){
           if(this.done && this.done.has(key)) continue;              // 이미 처리한 확정 결과 재전달
-          const d=this.dedup.check(tx, lang);
+          const d=this.dedup.check(tx, rl);
           if(d.drop){ pipe.drop(key); continue; }                    // 반복된 같은 문장
           tx=d.text;
           (this.done||(this.done=new Set())).add(key);
         }
-        pipe.hyp(key, tx, res.isFinal, {lang, role:roleOfLang(lang)});
+        pipe.hyp(key, tx, res.isFinal, {lang:rl, role:roleOfLang(rl)});
       }
     };
     r.onerror=e=>{
@@ -838,7 +849,7 @@ class WhisperASR{
     try{
       const r=await asrW.call({type:'lid', slot:finalSlot(), audio:this.audio(u), cands:cands.map(l=>L[l].whisper)});
       const sc={}; cands.forEach(l=>{ sc[l]=r.scores[L[l].whisper]; });
-      const d=C.decideLang(sc, cands, this.lastLang || srcOf(app.active), 1.0);
+      const d=C.decideLang(sc, cands, srcOf(app.active), 1.0);   // 차이가 작으면 대화 순서 예측을 따름
       u.lang=d.lang; u.role=roleOfLang(d.lang);
     }catch(e){ u.role=app.active; u.lang=srcOf(u.role); toastOnce('lid','⚠️ 언어 자동 판별 실패 — 현재 방향으로 인식합니다'); }
     this.lastLang=u.lang;
@@ -940,6 +951,7 @@ const pipe = {
       if(C.isEcho(u.committed, TTS.recent)){ this.utts.delete(key); return; }
     }
     if(!u.committed && !u.tail){ if(u.final){ this.utts.delete(key); view.remove(u); } return; }
+    if(u.final && u.committed) app.onFinalTurn(u.role);
     view.src(u);
     this.pump(u);
   },
@@ -1084,7 +1096,6 @@ const app = {
     }
     // --- 음성 인식 엔진 ---
     let asr=S.asr;
-    if(S.dirMode==='auto' && asr!=='whisper'){ asr='whisper'; toastOnce('autoW','자동 화자 감지는 Whisper 엔진으로 동작합니다'); }
     const okLocal = s => s==='available'||s==='downloadable'||s==='downloading'||s==='readily'||s==='after-download';
     if(asr==='auto'){
       if(WebSpeechASR.Ctor()){
@@ -1136,7 +1147,7 @@ const app = {
         this.asr=new WebSpeechASR(this.eng.asr==='ws-local');
         this.asr.start(srcOf(this.active));
       }
-      this.running=true; this.paused=false; this.startAt=Date.now();
+      this.running=true; this.paused=false; this.startAt=Date.now(); TURN.set(this.active);
       this.reqWake();
     }catch(e){
       console.warn(e);
@@ -1160,9 +1171,31 @@ const app = {
     this.render();
   },
   setActive(role){
-    if(this.active===role) return;
+    TURN.set(role);
+    const changed=this.active!==role;
     this.active=role;
-    if(this.running && this.asr) this.asr.setLang(srcOf(role));
+    if(this.running && this.asr && this.asr.lang!==srcOf(role)) this.asr.setLang(srcOf(role));
+    if(changed) this.render();
+  },
+  // 자동 화자: 한 발화가 확정되면 같은 화자가 이어 말할 수 있다고 보고, 통역 낭독이 끝나면 상대 차례로 넘긴다
+  onFinalTurn(role){
+    if(S.dirMode!=='auto') return;
+    const will = S.audioOut && (role==='A'?S.ttsA:S.ttsB) && ('speechSynthesis' in window);
+    TURN.onFinal(role, Date.now(), will);
+    if(this.active!==role){
+      this.active=role;
+      // 문자 재분류 등으로 화자가 바뀐 것이 확인되면, 같은 화자가 이어 말할 것에 대비해 그 언어로 듣기
+      if(this.asr && this.asr.kind!=='whisper' && !this.asr.inSpeech && this.asr.lang!==srcOf(role)) this.asr.setLang(srcOf(role));
+      this.render();
+    }
+  },
+  turnTick(){
+    if(!this.running || S.dirMode!=='auto' || this.paused) return;
+    const r=TURN.tick(Date.now(), {ttsBusy:TTS.busy(), ttsStartAt:TTS.lastStart, ttsEndAt:TTS.lastEnd});
+    if(!r.changed || r.role===this.active) return;
+    this.active=r.role;
+    // 말하는 도중이 아니면 바로 상대 언어로 다시 듣기 (말하는 중이면 그 문장이 끝난 뒤 적용)
+    if(this.asr && this.asr.kind!=='whisper' && !this.asr.inSpeech) this.asr.setLang(srcOf(r.role));
     this.render();
   },
   onAutoRole(role){ if(this.active!==role){ this.active=role; this.render(); } },
@@ -1183,14 +1216,21 @@ const app = {
     else{ b.textContent='▶ 통역 시작'; b.disabled=false; b.classList.remove('stop'); }
     $('dirA').classList.toggle('on',this.active==='A'); $('dirB').classList.toggle('on',this.active==='B');
     $('dirA').classList.toggle('auto',S.dirMode==='auto'); $('dirB').classList.toggle('auto',S.dirMode==='auto');
-    $('dirAsub').textContent=L[S.myLang].name+' → '+L[S.partnerLang].name;
-    $('dirBsub').textContent=L[S.partnerLang].name+' → '+L[S.myLang].name;
+    if(S.dirMode==='auto'){
+      $('dirAt').textContent='🎤 나'; $('dirBt').textContent='👂 상대';
+      $('dirAsub').textContent=this.running && this.active==='A' ? '🎧 '+L[S.myLang].name+' 듣는 중' : L[S.myLang].name+' · 자동';
+      $('dirBsub').textContent=this.running && this.active==='B' ? '🎧 '+L[S.partnerLang].name+' 듣는 중' : L[S.partnerLang].name+' · 자동';
+    }else{
+      $('dirAt').textContent='🎤 내가 말함'; $('dirBt').textContent='👂 상대가 말함';
+      $('dirAsub').textContent=L[S.myLang].name+' → '+L[S.partnerLang].name;
+      $('dirBsub').textContent=L[S.partnerLang].name+' → '+L[S.myLang].name;
+    }
     if(S.layout==='face'){
       $('lblTrans').textContent='상대 화면 · '+L[S.partnerLang].name; $('lblTransR').textContent='';
       $('lblSrc').textContent='내 화면 · '+L[S.myLang].name; $('lblSrcR').textContent='';
     }else{
       $('lblTrans').textContent='통역 → '+L[tgtOf(this.active)].name;
-      $('lblTransR').textContent=S.dirMode==='auto'?'자동 화자 감지':'수동 전환';
+      $('lblTransR').textContent=S.dirMode==='auto'?'자동 화자 판단 · 틀리면 버튼 탭':'수동 전환';
       $('lblSrc').textContent='원문'; $('lblSrcR').textContent='';
     }
     $('tPause').textContent=this.paused?'▶ 재개':'⏸ 정지'; $('tPause').classList.toggle('on',this.paused);
@@ -1234,6 +1274,8 @@ function renderDot(){
   else if(app.starting) d.classList.add('busy');
 }
 setInterval(()=>app.tick(),1000);
+const TURN=new C.TurnPredictor();
+setInterval(()=>app.turnTick(),150);
 setInterval(()=>{ if(app.running && app.asr && app.asr.kind==='whisper') $('lvlBar').style.width=Math.min(100,app.asr.level*600)+'%'; },100);
 document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='visible' && app.running){ app.reqWake(); if(app.asr && app.asr.ctx && app.asr.ctx.state==='suspended') app.asr.ctx.resume().catch(()=>{}); }
