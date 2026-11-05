@@ -208,6 +208,13 @@
       <option value="whisper">Whisper · 기기 내 실행 (WebGPU/WASM, 완전 오프라인)</option>
     </select>
     <small>자동: 기기 내 Web Speech → (완전 로컬 모드가 아니면) 브라우저 기본 Web Speech → Whisper</small></div>
+  <div class="fld"><label>Web Speech 인식 방식</label>
+    <select id="fWsMode">
+      <option value="auto">자동 — 안드로이드는 문장 단위, 그 외 연속</option>
+      <option value="single">문장 단위 — 한 문장 인식 후 즉시 재시작 (중복 없음)</option>
+      <option value="continuous">연속 — 끊김 없음 (안드로이드에서 같은 문장이 반복될 수 있음)</option>
+    </select>
+    <small>안드로이드 Chrome 의 연속 인식은 같은 문장을 반복해서 보내는 경우가 있어, 문장 단위로 인식하고 중복을 걸러냅니다.</small></div>
   <div class="grid2">
     <div class="fld"><label>Whisper 모델</label>
       <select id="fWModel">
@@ -332,10 +339,11 @@ const C = window.InterpCore, L = C.LANGS;
 const $ = id => document.getElementById(id);
 const UA = navigator.userAgent || '';
 const IS_IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1);
+const IS_ANDROID = /Android/i.test(UA);
 
 /* ---------------- 설정 ---------------- */
 const DEF = { myLang:'ko', partnerLang:'en', dirMode:'manual', layout:'stack', asr:'auto', mt:'auto',
-  wModel:'auto', wCustom:'', device:'auto', twoPass:'auto', prompt:true, multi:'auto', opus:'auto',
+  wModel:'auto', wCustom:'', device:'auto', twoPass:'auto', prompt:true, multi:'auto', opus:'auto', wsMode:'auto',
   aggr:'normal', agreeN:2, preview:true, endMs:650,
   ttsA:true, ttsB:true, audioOut:true, rate:1.05, adapt:true, echo:'speaker',
   gloss:true, userGl:'', strict:false, saveHist:true, fs:20, flip:false };
@@ -671,7 +679,10 @@ class WebSpeechASR{
     if(typeof R.installOnDevice==='function') return await R.installOnDevice(bcp);
     return false;
   }
-  constructor(local){ this.local=local; this.rec=null; this.on=false; this.lang=null; this.sess=0; this.restarts=[]; this.kind=local?'ws-local':'ws-cloud'; this.noPhrases=false; this.biased=false; }
+  constructor(local){ this.local=local; this.rec=null; this.on=false; this.lang=null; this.sess=0; this.restarts=[]; this.kind=local?'ws-local':'ws-cloud'; this.noPhrases=false; this.biased=false;
+    // 안드로이드 Chrome 연속 인식은 같은 문장을 반복·누적해 보내므로 문장 단위(continuous=false)로 인식하고 즉시 재시작
+    this.single = S.wsMode==='single' || (S.wsMode!=='continuous' && IS_ANDROID);
+    this.dedup = new C.FinalDedup({ windowMs:4000, cumulative: !this.single && IS_ANDROID }); }
   start(lang){ this.on=true; this.lang=lang; this.open(); }
   // 문맥 가중치(contextual biasing): 용어집을 인식기에 미리 알려 전문용어 인식률을 높인다
   applyPhrases(r, lang){
@@ -686,15 +697,25 @@ class WebSpeechASR{
   open(){
     const R=WebSpeechASR.Ctor(), r=new R(), sess=++this.sess, lang=this.lang;
     this.rec=r;
-    r.lang=L[lang].bcp; r.continuous=true; r.interimResults=true; r.maxAlternatives=3;
+    r.lang=L[lang].bcp; r.continuous=!this.single; r.interimResults=true; r.maxAlternatives=3;
+    let got=false;
     if(this.local){ if('processLocally' in r) r.processLocally=true; else if('mode' in r) r.mode='ondevice-only'; }
     this.applyPhrases(r, lang);
     r.onresult=e=>{
       for(let i=e.resultIndex;i<e.results.length;i++){
         const res=e.results[i];
         const alts=Array.from({length:res.length},(_,j)=>({transcript:(res[j]&&res[j].transcript)||'', confidence:(res[j]&&res[j].confidence)||0}));
-        const tx = res.isFinal && alts.length>1 ? C.rerank(alts, lang, GL) : (alts[0] ? alts[0].transcript : '');
-        pipe.hyp('ws'+sess+'_'+i, tx, res.isFinal, {lang, role:roleOfLang(lang)});
+        let tx = res.isFinal && alts.length>1 ? C.rerank(alts, lang, GL) : (alts[0] ? alts[0].transcript : '');
+        const key='ws'+sess+'_'+i;
+        if(tx.trim()) got=true;
+        if(res.isFinal){
+          if(this.done && this.done.has(key)) continue;              // 이미 처리한 확정 결과 재전달
+          const d=this.dedup.check(tx, lang);
+          if(d.drop){ pipe.drop(key); continue; }                    // 반복된 같은 문장
+          tx=d.text;
+          (this.done||(this.done=new Set())).add(key);
+        }
+        pipe.hyp(key, tx, res.isFinal, {lang, role:roleOfLang(lang)});
       }
     };
     r.onerror=e=>{
@@ -709,6 +730,7 @@ class WebSpeechASR{
     r.onend=()=>{
       if(this.rec!==r) return;
       this.rec=null; pipe.endSession('ws'+sess);
+      if(got) this.restarts=[];        // 정상적으로 인식하고 끝난 세션은 재시작 실패로 세지 않음 (문장 단위 모드)
       if(this.on && !app.paused) this.reopen();
     };
     try{ r.start(); }catch(e){ this.rec=null; if(this.on) this.reopen(); }
@@ -716,7 +738,7 @@ class WebSpeechASR{
   reopen(){
     const n=Date.now(); this.restarts=this.restarts.filter(t=>n-t<15000); this.restarts.push(n);
     if(this.restarts.length>10){ this.on=false; toast('⛔ 음성 인식이 반복해서 끊깁니다 — Whisper 엔진을 사용해 보세요'); app.stop(); return; }
-    setTimeout(()=>{ if(this.on && !this.rec && !app.paused) this.open(); }, this.restarts.length>4?700:80);
+    setTimeout(()=>{ if(this.on && !this.rec && !app.paused) this.open(); }, this.restarts.length>4?700:(this.single?30:80));
   }
   setLang(lang){
     if(lang===this.lang) return;
@@ -977,6 +999,8 @@ const pipe = {
     for(const [k,u] of [...this.utts]) if(k.startsWith(prefix+'_') && !u.final) this.hyp(k,[u.committed,u.tail].filter(Boolean).join(' '),true,{});
   },
   endAll(){ for(const [k,u] of [...this.utts]) if(!u.final) this.hyp(k,[u.committed,u.tail].filter(Boolean).join(' '),true,{}); },
+  // 중복으로 판정된 발화 제거 (진행 중이던 줄도 화면에서 지움)
+  drop(key){ const u=this.utts.get(key); if(u && !u.final){ u.final=true; this.utts.delete(key); if(!u.trs.length) view.remove(u); } },
   typed(text){
     const role=app.active, k='tx'+(++this.nTyped)+'_0';
     this.hyp(k, text, true, {lang:srcOf(role), role});
@@ -1261,7 +1285,7 @@ function fillLang(sel,val){ sel.textContent=''; Object.entries(L).forEach(([c,o]
 function openSet(){
   fillLang($('fMine'),S.myLang); fillLang($('fPartner'),S.partnerLang);
   $('fDir').value=S.dirMode; $('fLayout').value=S.layout; $('fAsr').value=S.asr;
-  $('fWModel').value=S.wModel; if(!$('fWModel').value){ $('fWModel').value='custom'; S.wCustom=S.wCustom||S.wModel; }
+  $('fWsMode').value=S.wsMode; $('fWModel').value=S.wModel; if(!$('fWModel').value){ $('fWModel').value='custom'; S.wCustom=S.wCustom||S.wModel; }
   $('fWCustom').value=S.wCustom; $('wCustomRow').style.display=$('fWModel').value==='custom'?'flex':'none';
   $('fDevice').value=S.device; $('fTwo').value=S.twoPass; $('fPrompt').checked=S.prompt;
   $('fMt').value=S.mt; $('fMulti').value=S.multi; $('fOpus').value=S.opus; $('fAggr').value=S.aggr;
@@ -1277,14 +1301,14 @@ function openSet(){
 }
 function readForm(){
   S.myLang=$('fMine').value; S.partnerLang=$('fPartner').value; S.dirMode=$('fDir').value; S.layout=$('fLayout').value; S.asr=$('fAsr').value;
-  S.wModel=$('fWModel').value; S.wCustom=$('fWCustom').value.trim(); S.device=$('fDevice').value; S.twoPass=$('fTwo').value; S.prompt=$('fPrompt').checked;
+  S.wsMode=$('fWsMode').value; S.wModel=$('fWModel').value; S.wCustom=$('fWCustom').value.trim(); S.device=$('fDevice').value; S.twoPass=$('fTwo').value; S.prompt=$('fPrompt').checked;
   S.mt=$('fMt').value; S.multi=$('fMulti').value; S.opus=$('fOpus').value;
   S.aggr=$('fAggr').value; S.agreeN=+$('fAgree').value; S.preview=$('fPreview').checked; S.endMs=+$('fEnd').value;
   S.ttsA=$('fTtsA').checked; S.ttsB=$('fTtsB').checked; S.rate=+$('fRate').value; S.adapt=$('fAdapt').checked; S.echo=$('fEcho').value;
   S.gloss=$('fGloss').checked; S.userGl=$('fUserGl').value; S.strict=$('fStrict').checked; S.saveHist=$('fSave').checked; S.fs=+$('fFs').value;
 }
 async function closeSet(){
-  const keys=['myLang','partnerLang','dirMode','asr','wModel','wCustom','device','twoPass','mt','multi','opus','strict','endMs'];
+  const keys=['myLang','partnerLang','dirMode','asr','wsMode','wModel','wCustom','device','twoPass','mt','multi','opus','strict','endMs'];
   const before=JSON.stringify(keys.map(k=>S[k])), layoutBefore=S.layout;
   readForm();
   if(!S.saveHist) lsDel('li_hist'); else lsSet('li_hist', JSON.stringify(HIST));

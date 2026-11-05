@@ -473,6 +473,34 @@
     return similarity(a, b) < 0.85;
   }
 
+  /* ---------------- 9) Web Speech 확정 결과 중복 제거 ----------------
+     안드로이드 Chrome 의 연속(continuous) 인식은 같은 문장을 결과 목록에 다시 넣거나
+     앞 문장을 누적해 보내는 경우가 있다(사용자 실기기에서 같은 문장이 2번씩 기록됨).
+     - 같은 화자·언어로 windowMs 안에 같은 문장(또는 방금 문장의 일부)이 다시 오면 버림
+     - cumulative 모드: 앞 문장 + 새 내용 형태로 오면 새로 붙은 부분만 사용 */
+  const normAll = s => String(s || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+  class FinalDedup {
+    constructor(o) { this.o = Object.assign({ windowMs: 4000, cumulative: false }, o || {}); this.last = null; }
+    reset() { this.last = null; }
+    check(text, lang, now) {
+      const t = String(text || '').trim(), n = normAll(t);
+      const at = now == null ? Date.now() : now;
+      if (!n) return { drop: true, reason: 'empty' };
+      const P = this.last;
+      if (P && P.lang === lang && at - P.at <= this.o.windowMs) {
+        if (n === P.n || (n.length >= 4 && P.n.includes(n))) { P.at = at; return { drop: true, reason: 'dup' }; }
+        if (this.o.cumulative && n.length > P.n.length && n.startsWith(P.n)) {
+          const w = toks(t, lang), k = toks(P.t, lang).length;
+          this.last = { t, n, at, lang };
+          const ext = join(w.slice(k), lang);
+          return ext ? { text: ext, reason: 'ext' } : { drop: true, reason: 'dup' };
+        }
+      }
+      this.last = { t, n, at, lang };
+      return { text: t };
+    }
+  }
+
   /* ---------------- 내보내기 ---------------- */
   function pad(n) { return String(n).padStart(2, '0'); }
   function hms(ts) { const d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
@@ -498,6 +526,6 @@
     LANGS, toks, join, normTok, Agreement, segment, buildGlossary, parseUserGlossary, findTerms,
     applyGlossary, verifyTerms, isHallucination, collapseRepeats, similarity, isEcho, Stat,
     adaptiveRate, rms, Vad, toTxt, toCsv, hms,
-    correctAsr, acronymKo, promptTerms, buildPrompt, maxTokensFor, decideLang, rerank, devicePlan, needsRevision,
+    correctAsr, acronymKo, promptTerms, buildPrompt, maxTokensFor, decideLang, rerank, devicePlan, needsRevision, FinalDedup,
   };
 });
