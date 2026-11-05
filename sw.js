@@ -5,7 +5,7 @@
    - 런타임: 배포본은 같은 출처 ./vendor/ (캐시 우선), 개발 환경은 jsDelivr @3.7.6 (캐시 우선)
    - 모델 가중치(Hugging Face)는 transformers.js 가 자체 Cache Storage 에 저장하므로 관여하지 않음
    - 통역 내용은 어떤 요청에도 포함되지 않음 (GET 정적 파일만 캐시) */
-const APP_CACHE = 'li-app-383b87d';
+const APP_CACHE = 'li-app-5d98e92';
 const RT_CACHE = 'li-runtime-v1';
 const SHELL = ['./', './index.html', './core.js', './glossary.js', './engine.mjs', './worker.mjs', './manifest.webmanifest'];
 const RT_PREFIX = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.6/';
@@ -53,7 +53,10 @@ self.addEventListener('fetch', e => {
     return;
   }
   if (new URL(url).origin === self.location.origin) {
-    e.respondWith(fetch(req).then(res => {
+    // GitHub Pages 는 max-age=600 을 보내므로 그냥 fetch 하면 브라우저 HTTP 캐시의 예전 파일이 섞일 수 있다
+    // → 항상 재검증(no-cache). 바뀌지 않았으면 304 라 데이터 낭비는 거의 없음
+    const fresh = req.mode === 'navigate' ? new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' }) : new Request(req, { cache: 'no-cache' });
+    e.respondWith(fetch(fresh).then(res => {
       if (res.ok) { const cl = res.clone(); caches.open(APP_CACHE).then(c => c.put(req, cl)); }
       return isolate(res);
     }).catch(async () => isolate((await caches.match(req)) || (await caches.match('./index.html')))));

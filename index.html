@@ -323,8 +323,8 @@
   <button class="btn pri" id="bRecClose">닫기</button>
 </div></div>
 
-<script src="core.js"></script>
-<script src="glossary.js"></script>
+<script src="core.js?v=5d98e92"></script>
+<script src="glossary.js?v=5d98e92"></script>
 <script>
 'use strict';
 /* =====================================================================
@@ -336,6 +336,15 @@
    └  TTS : speechSynthesis (기기 내 음성 우선)
    ===================================================================== */
 const C = window.InterpCore, L = C.LANGS;
+// 캐시 때문에 새 화면(index.html)과 예전 로직(core.js)이 섞이면 오류 대신 1회 새로고침
+(function(){
+  const NEED=3;
+  if((C.API||0) >= NEED){ try{ sessionStorage.removeItem('li_skew'); }catch(e){} return; }
+  let tried=false; try{ tried=!!sessionStorage.getItem('li_skew'); sessionStorage.setItem('li_skew','1'); }catch(e){}
+  document.addEventListener('DOMContentLoaded',()=>{ const st=document.getElementById('status'); if(st) st.textContent= tried ? '⚠️ 이전 버전 파일이 남아 있습니다 — 잠시 후 다시 열어 주세요' : '🔄 새 버전으로 업데이트 중…'; });
+  if(!tried){ setTimeout(()=>location.reload(), 300); }
+  throw new Error('app/core version mismatch');
+})();
 const $ = id => document.getElementById(id);
 const UA = navigator.userAgent || '';
 const IS_IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1);
@@ -420,7 +429,7 @@ class ModelWorker{
   constructor(name){ this.name=name; this.w=null; this.seq=0; this.pend=new Map(); this.keys={}; this.dev={}; this.loading={}; }
   spawn(){
     if(this.w) return;
-    this.w=new Worker('worker.mjs',{type:'module', name:this.name});
+    this.w=new Worker('worker.mjs?v=5d98e92',{type:'module', name:this.name});
     this.w.onmessage=e=>{
       const m=e.data;
       if(m.type==='progress'){ PROG.update(m.p); return; }

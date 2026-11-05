@@ -523,6 +523,7 @@
   }
 
   return {
+    API: 3,   // index.html 과 짝이 맞는지 확인하는 버전 (기능 추가 시 올림)
     LANGS, toks, join, normTok, Agreement, segment, buildGlossary, parseUserGlossary, findTerms,
     applyGlossary, verifyTerms, isHallucination, collapseRepeats, similarity, isEcho, Stat,
     adaptiveRate, rms, Vad, toTxt, toCsv, hms,
